@@ -315,8 +315,8 @@ public final class TicketInfo implements SerializableRead, Externalizable {
         
         return ncfType;
     }
-    public void setNcfType(String ncfType){
-        this.ncfType= ncfType;
+if (this.ncfType == null || this.ncfType.isEmpty() || !this.ncfType.equals(ncfType)) {
+        this.ncfType = ncfType;
     }
     // End Changes
 
