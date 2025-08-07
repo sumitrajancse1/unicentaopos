@@ -470,6 +470,7 @@ public class JPanelCloseMoney extends JPanel implements JPanelView, BeanFactoryA
         jButtonDetail = new javax.swing.JButton();
         jButton1 = new javax.swing.JButton();
         jButton2 = new javax.swing.JButton();
+        jButton3 = new javax.swing.JButton();
 
         setLayout(new java.awt.BorderLayout());
 
@@ -697,7 +698,7 @@ public class JPanelCloseMoney extends JPanel implements JPanelView, BeanFactoryA
                 jButtonResetActionPerformed(evt);
             }
         });
-        jPanel1.add(jButtonReset, new org.netbeans.lib.awtextra.AbsoluteConstraints(970, 100, 260, 50));
+        jPanel1.add(jButtonReset, new org.netbeans.lib.awtextra.AbsoluteConstraints(1150, 100, 80, 50));
 
         jButtonDetail.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
         jButtonDetail.setText("Summary Report");
@@ -728,6 +729,17 @@ public class JPanelCloseMoney extends JPanel implements JPanelView, BeanFactoryA
             }
         });
         jPanel1.add(jButton2, new org.netbeans.lib.awtextra.AbsoluteConstraints(710, 40, 250, 50));
+
+        jButton3.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
+        jButton3.setText("UBER/PEDIDOSYA");
+        jButton3.setToolTipText("Lista de pedidos de Uber/pedidosya");
+        jButton3.setBorder(javax.swing.BorderFactory.createBevelBorder(javax.swing.border.BevelBorder.RAISED));
+        jButton3.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jButton3ActionPerformed(evt);
+            }
+        });
+        jPanel1.add(jButton3, new org.netbeans.lib.awtextra.AbsoluteConstraints(970, 100, 170, 50));
 
         add(jPanel1, java.awt.BorderLayout.CENTER);
     }// </editor-fold>//GEN-END:initComponents
@@ -997,14 +1009,6 @@ public class JPanelCloseMoney extends JPanel implements JPanelView, BeanFactoryA
    
     
 };
-            //jScrollPaneDetails.add(table);
-            //table.setPreferredScrollableViewportSize(table.getPreferredSize());
-           // table.setEnabled(false);
-            //table.createDefaultRenderers();
-           // table.getTableHeader().setReorderingAllowed(true); 
-           // table.setAutoCreateRowSorter(true);    
-            //table.setAutoResizeMode(JTable.AUTO_RESIZE_ON);
-            //table.repaint();
             table.setRowHeight(25);
             table.setFont(new Font("Arial", Font.PLAIN, 14));
             table.setEnabled(true);
@@ -1015,11 +1019,55 @@ public class JPanelCloseMoney extends JPanel implements JPanelView, BeanFactoryA
         }catch (Exception e) {
         }
     }//GEN-LAST:event_jButton2ActionPerformed
+
+    private void jButton3ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton3ActionPerformed
+        // TODO add your handling code here:
+        //Sumit
+              try{
+            s=m_App.getSession();
+            con=s.getConnection();  
+            String sdbmanager = m_dlSystem.getDBVersion();           
+           
+            SQL = " SELECT ticketid as TICKET,ordertype as ORDERTYPE,orderno as CUSTOMER, receipts.datenew AS TIME" +
+            ",round(SUM((ticketlines.PRICE + ticketlines.PRICE * taxes.RATE ) * ticketlines.UNITS),2) AS AMOUNT " +
+            " FROM receipts, tickets, ticketlines, products ,closedcash,taxes " +
+            "  WHERE receipts.ID = tickets.ID " +
+            " AND tickets.ID = ticketlines.TICKET " +
+            " AND ticketlines.PRODUCT = products.ID " +
+            " AND receipts.MONEY = closedcash.money " +
+            " AND CLOSEDCASH.HOST = " + "'" + m_App.getProperties().getHost() + "'" +
+            " and ticketlines.taxid=taxes.id AND CLOSEDCASH.MONEY = " + "'" + m_App.getActiveCashIndex() + "'" +
+            " GROUP BY  tickets.ticketid ";
+            
+            stmt = (Statement) con.createStatement();      
+            rs = stmt.executeQuery(SQL);
+            table = new JTable(buildTableModel(rs)){
+
+    @Override
+    public boolean isCellEditable(int row, int column) {
+       //all cells false
+       return false;
+    }
+    
+   
+    
+};
+            table.setRowHeight(25);
+            table.setFont(new Font("Arial", Font.PLAIN, 14));
+            table.setEnabled(true);
+            jScrollPaneDetails.setViewportView(table);
+            rs=null;
+                con=null;
+                s=null;                
+        }catch (Exception e) {
+        }
+    }//GEN-LAST:event_jButton3ActionPerformed
    
     
     // Variables declaration - do not modify//GEN-BEGIN:variables
     private javax.swing.JButton jButton1;
     private javax.swing.JButton jButton2;
+    private javax.swing.JButton jButton3;
     private javax.swing.JButton jButtonDetail;
     private javax.swing.JButton jButtonReset;
     private javax.swing.JComboBox<String> jCBCloseCash;

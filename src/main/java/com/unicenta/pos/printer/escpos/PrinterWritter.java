@@ -19,6 +19,7 @@
 
 package com.unicenta.pos.printer.escpos;
 
+import java.io.OutputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -78,6 +79,7 @@ public abstract class PrinterWritter {
      *
      * @param data
      */
+   
     public void write(final byte[] data) {
         exec.execute(new Runnable() {
             @Override

@@ -45,4 +45,6 @@ public interface AppProperties {
      * @return key pair property
      */
     public String getProperty(String sKey);
+
+    public String getProperty(String ecfrnc, String string);
 }

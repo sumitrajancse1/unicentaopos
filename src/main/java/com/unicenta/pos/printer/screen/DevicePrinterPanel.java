@@ -79,6 +79,8 @@ public class DevicePrinterPanel extends javax.swing.JPanel implements DevicePrin
      *
      * @return
      */
+ 
+
     @Override
     public JComponent getPrinterComponent() {
         return this;
@@ -146,6 +148,7 @@ public class DevicePrinterPanel extends javax.swing.JPanel implements DevicePrin
     public void endLine() {
         m_ticketcurrent.endLine();
     } 
+   
 
     /**
      *

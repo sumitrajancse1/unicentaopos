@@ -397,4 +397,9 @@ public class AppConfig implements AppProperties {
 
   }
 
+    @Override
+    public String getProperty(String ecfrnc, String string) {
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    }
+
 }

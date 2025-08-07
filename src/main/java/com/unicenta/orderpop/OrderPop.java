@@ -1,29 +1,3 @@
-//  uniCenta oPOS  - Touch Friendly Point Of Sale
-//  Copyright (c) 2017 uniCenta
-//  https://unicenta.com
-//
-//  This file is part of uniCenta Remote Display
-//
-//  uniCenta Remote Display is free software: you can redistribute it and/or modify
-//  it under the terms of the GNU General Public License as published by
-//  the Free Software Foundation, either version 3 of the License, or
-//  (at your option) any later version.
-//
-//  uniCenta Remote Display is distributed in the hope that it will be useful,
-//  but WITHOUT ANY WARRANTY; without even the implied warranty of
-//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-//  GNU General Public License for more details.
-//
-//  You should have received a copy of the GNU General Public License
-//  along with uniCenta oPOS.  If not, see <http://www.gnu.org/licenses/>.
-
-/* uniCenta's OrderPop is a simple utilty to list tickets sent to remote printer
- * It connects to and list uniCenta oPOS orders table rows and requires a
- * manual refresh using the button.
- * It runs independently of uniCenta oPOS and uses the provided orderpop.bat
-
- */
-
 package com.unicenta.orderpop;
 
 import com.unicenta.pos.forms.AppConfig;
@@ -46,263 +20,188 @@ import javafx.stage.WindowEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.sql.*;
-import java.util.concurrent.*;
+import java.time.LocalDateTime;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 @Slf4j
 public class OrderPop extends Application {
 
-  public static void main(String[] args) {
-    launch(args);
-  }
+    private ScheduledExecutorService scheduler;
 
-  private ExecutorService databaseExecutor;
-  private Future databaseSetupFuture;
-
-  @Override
-  public void init() throws Exception {
-    databaseExecutor = Executors.newFixedThreadPool(
-            1,
-            new DatabaseThreadFactory()
-    );
-    DBSetupTask setup = new DBSetupTask();
-    databaseSetupFuture = databaseExecutor.submit(setup);
-  }
-
-  // Pop the UI will use fxml rather than in code css to set styling later for release
-  @Override
-  public void start(Stage stage) throws InterruptedException, ExecutionException {
-
-    databaseSetupFuture.get();
-    final ListView<String> orderView = new ListView<>();
-    final ProgressIndicator databaseActivityIndicator = new ProgressIndicator();
-
-    Image fetchO = new Image(getClass().getResourceAsStream("/com/unicenta/images/resources.png"));
-    final Button fetchOrders = new Button("Fetch", new ImageView(fetchO));
-    // fetch Orders table data and fill the list
-    databaseActivityIndicator.setVisible(false);
-    fetchOrders.setOnAction(event ->
-            fetchDBOrdersListView(
-                    fetchOrders,
-                    databaseActivityIndicator,
-                    orderView
-            ));
-
-    Image closeO = new Image(getClass().getResourceAsStream("/com/unicenta/images/fileclose.png"));
-    final Button closeOrderList = new Button("Close", new ImageView(closeO));
-    closeOrderList.setOnAction(e -> {
-      try {
-        e.consume();
-        stop();
-        Platform.exit();
-      } catch (Exception ex) {
-        log.error(ex.getMessage());
-      }
-    });
-
-    stage.setOnCloseRequest((WindowEvent e) -> {
-      try {
-        Platform.exit();
-        stop();
-        Platform.exit();
-      } catch (Exception ex) {
-        log.error(ex.getMessage());
-      }
-    });
-
-    VBox layout = new VBox(10);
-    layout.setStyle("-fx-background-color: aliceblue; -fx-padding: 5;");
-    //layout.getChildren().setAll(
-    //        new HBox(10,
-    //                fetchOrders,
-    //                closeOrderList,
-    //                databaseActivityIndicator
-    //        ),
-    //        orderView
-    //);
-
-    layout.setPrefHeight(300);
-    layout.setPrefWidth(500);
-
-    stage.getIcons().add(new Image("/com/unicenta/images/unicentaopos.png"));
-    stage.setTitle("Orders Waiting...");
-    stage.setScene(new Scene(layout));
-    //stage.setAlwaysOnTop(true);
-    stage.show();
-
-  }
-
-  // shutdown the app
-  //@Override
-  public void istop() throws Exception {
-
-    databaseExecutor.shutdown();
-    if (!databaseExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
-      log.info("DB thread time-out + 3 sec's not shut down clean");
+    public static void main(String[] args) {
+        launch(args);
     }
 
-    Platform.exit();
-  }
-
-  private void fetchDBOrdersListView(
-          final Button triggerButton,
-          final ProgressIndicator databaseActivityIndicator,
-          final ListView<String> listView) {
-    final FetchOrdersTask fetchOrdersTask = new FetchOrdersTask();
-
-    triggerButton.disableProperty().bind(
-            fetchOrdersTask.runningProperty()
-    );
-
-    databaseActivityIndicator.visibleProperty().bind(
-            fetchOrdersTask.runningProperty()
-    );
-
-    databaseActivityIndicator.progressProperty().bind(
-            fetchOrdersTask.progressProperty()
-    );
-
-    fetchOrdersTask.setOnSucceeded(t ->
-            listView.setItems(fetchOrdersTask.getValue())
-    );
-
-    listView.setStyle("-fx-font-size: 14px;");
-
-// prep for css
-//        listView.getStylesheets().add(
-//                this.getClass().getResource("listStyle.css").toExternalForm());
-
-    databaseExecutor.submit(fetchOrdersTask);
-  }
-
-  abstract class DBTask<T> extends Task<T> {
-    DBTask() {
-      setOnFailed(t -> log.error(getException().getMessage()));
-    }
-  }
-
-  class FetchOrdersTask extends DBTask<ObservableList<String>> {
     @Override
-    protected ObservableList<String> call() throws Exception {
-      Thread.sleep(1000);
-      try (Connection con = getConnection()) {
-        return fetchOrders(con);
-      }
+    public void init() {
+        scheduler = Executors.newScheduledThreadPool(1, new OrderPopThreadFactory());
     }
 
-    // Using an ObservableList here but could use a table as well to give more
-    // flexibility to highlight specific row/column/cells
-    private ObservableList<String> fetchOrders(Connection con) throws SQLException {
-      log.info("Fetch Orders from DB");
-      ObservableList<String> orders = FXCollections.observableArrayList();
-      Statement st = con.createStatement();
-      ResultSet rs = st.executeQuery("SELECT ticketid, orderid, "
-//                + "DATE_FORMAT(ordertime,'%b %d %Y %h:%i %p') AS ordertime, "
-              + "qty, "
-              + "ordertime, "
-              + "details "
-              + "FROM orders "
-              + "ORDER BY ordertime, orderid");
-
-      while (rs.next()) {
-        orders.add(rs.getString("ticketid") + " - "
-                + rs.getString("orderid") + " - "
-                + rs.getString("ordertime")
-                + " - " + rs.getString("qty")
-                + " * " + rs.getString("details"));
-      }
-
-      log.info("Found {} orders", orders.size());
-      return orders;
-    }
-  }
-
-  /*
-   * Check to see if we have a connection to database and
-   * and pop some data in Orders table to prime if needed
-   */
-  class DBSetupTask extends DBTask {
     @Override
-    protected Void call() throws Exception {
-      try (Connection con = getConnection()) {
-        if (!schemaExists(con)) {
-          //  un-comment if we need to create a new Orders table
-          // createSchema(con);
-          // populateDatabase(con);
+    public void start(Stage stage) {
+        final ListView<String> orderView = new ListView<>();
+        final ProgressIndicator databaseActivityIndicator = new ProgressIndicator();
+
+        Image closeImage = new Image(getClass().getResourceAsStream("/com/unicenta/images/fileclose.png"));
+        final Button closeOrderList = new Button("Close", new ImageView(closeImage));
+        closeOrderList.setOnAction(e -> {
+            try {
+                e.consume();
+                stop();
+                Platform.exit();
+            } catch (Exception ex) {
+                log.error(ex.getMessage());
+            }
+        });
+
+        Button completeOrder = new Button("Complete Order");
+        completeOrder.setOnAction(event -> markOrderAsComplete(orderView.getSelectionModel().getSelectedItem()));
+
+        Button itemComplete = new Button("Item Completed");
+        itemComplete.setOnAction(event -> markItemAsComplete(orderView.getSelectionModel().getSelectedItem()));
+
+        stage.setOnCloseRequest((WindowEvent e) -> {
+            try {
+                Platform.exit();
+                stop();
+            } catch (Exception ex) {
+                log.error(ex.getMessage());
+            }
+        });
+
+        VBox layout = new VBox(10);
+        layout.setStyle("-fx-background-color: aliceblue; -fx-padding: 5;");
+        HBox buttonLayout = new HBox(10, completeOrder, itemComplete, closeOrderList, databaseActivityIndicator);
+        layout.getChildren().addAll(buttonLayout, orderView);
+        layout.setPrefHeight(400);
+        layout.setPrefWidth(500);
+
+        stage.getIcons().add(new Image("/com/unicenta/images/unicentaopos.png"));
+        stage.setTitle("Orders Waiting...");
+        stage.setScene(new Scene(layout));
+        stage.show();
+
+        // Start the scheduled task to fetch orders periodically
+        scheduler.scheduleAtFixedRate(() -> fetchDBOrdersListView(orderView), 0, 5, TimeUnit.SECONDS);
+    }
+
+    @Override
+    public void stop() throws Exception {
+        scheduler.shutdown();
+        if (!scheduler.awaitTermination(3, TimeUnit.SECONDS)) {
+            log.info("Scheduler did not shut down cleanly within 3 seconds");
         }
-      }
-
-      return null;
+        Platform.exit();
     }
 
-    private boolean schemaExists(Connection con) {
-      log.info("Check for Orders table");
-      try {
-        Statement st = con.createStatement();
-        st.executeQuery("select count(*) from orders");
-        log.info("Orders table exists");
-      } catch (SQLException ex) {
-        log.info("Create Orders table");
-        return false;
-      }
-      return true;
+    private void fetchDBOrdersListView(ListView<String> listView) {
+        FetchOrdersTask fetchOrdersTask = new FetchOrdersTask();
+        fetchOrdersTask.setOnSucceeded(event -> {
+            listView.getItems().clear();
+            listView.getItems().addAll(fetchOrdersTask.getValue());
+        });
+        scheduler.submit(fetchOrdersTask);
     }
 
-/* 
- * We don't need to create Orders table as should already exist
- * as created by uniCenta oPOS or unicenta_remote_display apps
-    private void createSchema(Connection con) throws SQLException {
-      logger.info("Add Orders table to schema if not exist");
-      Statement st = con.createStatement();
-      String table = "create table orders(id integer, orderid varchar(50))";
-      st.executeUpdate(table);
-      logger.info("Created schema");
-    }
-*/
-    
-/*
- *  Useful if we want to fill the Orders table with some sample data
- *  MySQL-createSampleData.sql - INSERT x12 rows
-    private void populateDatabase(Connection con) throws SQLException {
-      logger.info("Populating database");      
-      Statement st = con.createStatement();      
-      for (String order: SAMPLE_ORDER_DATA) {
-        st.executeUpdate("insert into orders values(1,'" + order + "')");
-      }
-      logger.info("Populated database");
-    }
-*/
-  }
-
-  private Connection getConnection() throws ClassNotFoundException, SQLException {
-    // use explicit connection rather than uniCenta oPOS instance session
-    // better for this to be independent but use current instance's credentials
-
-    log.info("Get DB connection");
-
-    String url = AppConfig.getInstance().getProperty("db.URL") +
-            AppConfig.getInstance().getProperty("db.schema") +
-            AppConfig.getInstance().getProperty("db.options");
-    String sDBUser = AppConfig.getInstance().getProperty("db.user");
-    String sDBPassword = AppConfig.getInstance().getProperty("db.password");
-
-    if (sDBUser != null && sDBPassword != null && sDBPassword.startsWith("crypt:")) {
-      AltEncrypter cypher = new AltEncrypter("cypherkey" + sDBUser);
-      sDBPassword = cypher.decrypt(sDBPassword.substring(6));
+    private static class FetchOrdersTask extends Task<ObservableList<String>> {
+        @Override
+        protected ObservableList<String> call() {
+            ObservableList<String> orders = FXCollections.observableArrayList();
+            try (Connection con = getConnection()) {
+                Statement st = con.createStatement();
+                ResultSet rs = st.executeQuery("SELECT ticketid, orderid, ordertime, qty, details, displayid FROM orders WHERE displayid != 0 ORDER BY ordertime, orderid");
+                while (rs.next()) {
+                    orders.add(String.format("%s - %s - %s - %s * %s - %s",
+                        rs.getString("ticketid"),
+                        rs.getString("orderid"),
+                        rs.getString("ordertime"),
+                        rs.getString("qty"),
+                        rs.getString("details"),
+                        rs.getInt("displayid")));
+                }
+            } catch (SQLException ex) {
+                log.error("Failed to fetch orders: " + ex.getMessage());
+            } catch (ClassNotFoundException ex) {
+                Logger.getLogger(OrderPop.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            return orders;
+        }
     }
 
-    return DriverManager.getConnection(url, sDBUser, sDBPassword);
-  }
+    private void markOrderAsComplete(String orderDetails) {
+        if (orderDetails == null || orderDetails.isEmpty()) {
+            return; // No order selected
+        }
 
-  static class DatabaseThreadFactory implements ThreadFactory {
-    static final AtomicInteger poolNumber = new AtomicInteger(1);
+        // Extract relevant data from the selected order details
+        String[] details = orderDetails.split(" - ");
+        String ticketId = details[0];  // Assuming ticketId is in the first part
+        String orderId = details[1];   // Assuming orderId is in the second part
 
-    @Override
-    public Thread newThread(Runnable runnable) {
-      Thread thread = new Thread(runnable, "Database-Connection-"
-              + poolNumber.getAndIncrement() + "-thread");
-      thread.setDaemon(true);
-      return thread;
+        try (Connection con = getConnection()) {
+            PreparedStatement ps = con.prepareStatement("UPDATE orders SET displayid = ?, completetime = ? WHERE ticketid = ? AND orderid = ?");
+            ps.setInt(1, 0); // Set displayid to 0 to mark the order as completed
+            ps.setTimestamp(2, Timestamp.valueOf(LocalDateTime.now())); // Set the completion time
+            ps.setString(3, ticketId); // Use ticketid for the WHERE clause
+            ps.setString(4, orderId); // Use orderid for the WHERE clause
+            ps.executeUpdate();
+            log.info("Order {} marked as completed.", orderId);
+        } catch (SQLException | ClassNotFoundException ex) {
+            log.error("Failed to mark order as complete: " + ex.getMessage());
+        }
     }
-  }
+
+    private void markItemAsComplete(String itemDetails) {
+        if (itemDetails == null || itemDetails.isEmpty()) {
+            return; // No item selected
+        }
+
+        // Extract relevant data from the selected item details
+        String[] details = itemDetails.split(" - ");
+        String ticketId = details[0];  // Assuming ticketId is in the first part
+        String orderId = details[1];   // Assuming orderId is in the second part
+        String itemDetailsStr = details[4];  // Assuming details of the item are in the fifth part
+
+        try (Connection con = getConnection()) {
+            PreparedStatement ps = con.prepareStatement("UPDATE orders SET displayid = ? WHERE ticketid = ? AND orderid = ? AND details = ?");
+            ps.setInt(1, 0); // Set displayid to 0 to mark the item as completed
+            ps.setString(2, ticketId); // Use ticketid for the WHERE clause
+            ps.setString(3, orderId); // Use orderid for the WHERE clause
+            ps.setString(4, itemDetailsStr); // Use details for the WHERE clause
+            ps.executeUpdate();
+            log.info("Item {} from order {} marked as completed.", itemDetailsStr, orderId);
+        } catch (SQLException | ClassNotFoundException ex) {
+            log.error("Failed to mark item as complete: " + ex.getMessage());
+        }
+    }
+
+    private static Connection getConnection() throws ClassNotFoundException, SQLException {
+        log.info("Get DB connection");
+        String url = AppConfig.getInstance().getProperty("db.URL")
+            + AppConfig.getInstance().getProperty("db.schema")
+            + AppConfig.getInstance().getProperty("db.options");
+        String user = AppConfig.getInstance().getProperty("db.user");
+        String password = AppConfig.getInstance().getProperty("db.password");
+        if (user != null && password != null && password.startsWith("crypt:")) {
+            AltEncrypter cypher = new AltEncrypter("cypherkey" + user);
+            password = cypher.decrypt(password.substring(6));
+        }
+        return DriverManager.getConnection(url, user, password);
+    }
+
+    private static class OrderPopThreadFactory implements ThreadFactory {
+        static final AtomicInteger poolNumber = new AtomicInteger(1);
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread thread = new Thread(r, "OrderPop-Scheduler-" + poolNumber.getAndIncrement() + "-thread");
+            thread.setDaemon(true);
+            return thread;
+        }
+    }
 }

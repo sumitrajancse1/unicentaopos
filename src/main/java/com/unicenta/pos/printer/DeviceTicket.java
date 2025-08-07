@@ -31,6 +31,7 @@ import com.unicenta.pos.util.StringParser;
 import lombok.extern.slf4j.Slf4j;
 
 import java.awt.*;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -403,6 +404,18 @@ public class DeviceTicket {
    * @param sChar
    * @return Convert hex to character
    */
+  // Add this to DeviceTicket.java
+public OutputStream getPrinterOutputStream() {
+    // Find the first ESC/POS printer and return its output stream
+    for (DevicePrinter printer : m_deviceprinterslist) {
+        if (printer instanceof DevicePrinterESCPOS) {
+            return ((DevicePrinterESCPOS) printer).getOutputStream();
+
+        }
+    }
+    return null; // No ESC/POS printer found
+}
+
   public static byte transNumberChar(char sChar) {
     switch (sChar) {
       case '0':

@@ -89,6 +89,14 @@ public final class TicketInfo implements SerializableRead, Externalizable {
     private String ncfType;
     private String orderType;
     private String orderNo;
+    private String encf;
+private String encfStatus;
+private String encfSignature;
+private String encfQrPath;
+private Date encfSignedAt;
+private Date encfSentAt;
+private String encfResponsePath;
+
     // End changes 
     private static String Hostname;
 
@@ -130,6 +138,14 @@ public final class TicketInfo implements SerializableRead, Externalizable {
         orderType = "";
         orderNo = "";
         // End change
+        encf = "";
+encfSignature = "";
+encfStatus = "";
+encfResponsePath = "";
+encfQrPath = "";
+encfSignedAt = null;
+encfSentAt = null;
+
         
                 
     }
@@ -150,6 +166,14 @@ public final class TicketInfo implements SerializableRead, Externalizable {
         out.writeObject(pickupTime);
         out.writeObject(ncfType);
         out.writeObject(orderNo);
+        out.writeObject(encf);
+out.writeObject(encfSignature);
+out.writeObject(encfSignedAt);
+out.writeObject(encfSentAt);
+out.writeObject(encfStatus);
+out.writeObject(encfResponsePath);
+out.writeObject(encfQrPath);
+
         
         
     }
@@ -174,6 +198,15 @@ public final class TicketInfo implements SerializableRead, Externalizable {
         pickupTime = (String) in.readObject();
         ncfType = (String) in.readObject();
         orderNo =(String) in.readObject();
+        encf = (String) in.readObject();
+encfSignature = (String) in.readObject();
+encfSignedAt = (Date) in.readObject();
+encfSentAt = (Date) in.readObject();
+encfStatus = (String) in.readObject();
+encfResponsePath = (String) in.readObject();
+encfQrPath = (String) in.readObject();
+
+        
     }
 
     /**
@@ -207,6 +240,14 @@ public final class TicketInfo implements SerializableRead, Externalizable {
         pickupTime = dr.getString(13);
         ncfType = dr.getString(14);
         orderNo = dr.getString(15);
+        encf = dr.getString(16);
+encfSignature = dr.getString(17);
+encfSignedAt = dr.getTimestamp(18);
+encfSentAt = dr.getTimestamp(19);
+encfStatus = dr.getString(20);
+encfResponsePath = dr.getString(21);
+encfQrPath = dr.getString(22);
+
     }
 
     /**
@@ -244,6 +285,14 @@ public final class TicketInfo implements SerializableRead, Externalizable {
         t.ncfType = ncfType;
         t.orderType = orderType;
         t.orderNo = orderNo;
+        t.encf = this.encf;
+t.encfSignature = this.encfSignature;
+t.encfSignedAt = this.encfSignedAt;
+t.encfSentAt = this.encfSentAt;
+t.encfStatus = this.encfStatus;
+t.encfResponsePath = this.encfResponsePath;
+t.encfQrPath = this.encfQrPath;
+
         
         return t;
     }
@@ -275,6 +324,27 @@ public final class TicketInfo implements SerializableRead, Externalizable {
     public void setOrderNo(String orderNo ){
         this.orderNo = orderNo;
     }
+    public String getENCF() { return encf; }
+public void setENCF(String encf) { this.encf = encf; }
+
+public void setENCFStatus(String status) { this.encfStatus = status; }
+public String getENCFStatus() { return encfStatus; }
+
+public void setENCFSignature(String sig) { this.encfSignature = sig; }
+public String getENCFSignature() { return encfSignature; }
+
+public void setENCFQrPath(String path) { this.encfQrPath = path; }
+public String getENCFQrPath() { return encfQrPath; }
+
+public void setENCFSignedAt(Date d) { this.encfSignedAt = d; }
+public Date getENCFSignedAt() { return encfSignedAt; }
+
+public void setENCFSentAt(Date d) { this.encfSentAt = d; }
+public Date getENCFSentAt() { return encfSentAt; }
+
+public void setENCFResponsePath(String path) { this.encfResponsePath = path; }
+public String getENCFResponsePath() { return encfResponsePath; }
+
     public String getPickupTime(){
         return pickupTime;
     }
@@ -317,6 +387,9 @@ public final class TicketInfo implements SerializableRead, Externalizable {
     }
     public void setNcfType(String ncfType){
         this.ncfType= ncfType;
+        if (this.ncfType == null || this.ncfType.isEmpty() || !this.ncfType.equals(ncfType)) {
+        this.ncfType = ncfType;
+    }
     }
     // End Changes
 
@@ -775,6 +848,14 @@ public final class TicketInfo implements SerializableRead, Externalizable {
        // return getPickupTime();
        return pickupTime == null ? "" : getPickupTime();
     }
+    
+    public String printQRCode() {
+    return encfQrPath == null ? "" : encfQrPath; // RAW URL for barcode
+}
+
+public String printQRCodeEscaped() {
+    return encfQrPath == null ? "" : encfQrPath.replace("&", "&amp;"); // Escaped for XML <text>
+}
     public String printTotalPaid() {
         return Formats.CURRENCY.formatValue(getTotalPaid());
     }
@@ -968,6 +1049,16 @@ public final class TicketInfo implements SerializableRead, Externalizable {
    public String printSubTotalWithoutService() {
         return Formats.CURRENCY.formatValue(getSubTotalWithoutService());
     }
-/* End Change Sumit */    
-   
+  
+   private TicketLineInfo getServiceChargeLine() {
+    for (TicketLineInfo line : this.getLines()) {
+        if (line.isServiceChargeLine()) {
+            return line;
+        }
+    }
+    return null;
 }
+
+}
+   /* End Change Sumit */    
+   

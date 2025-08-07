@@ -108,4 +108,8 @@ public class PrinterWritterRXTX extends PrinterWritter /* implements SerialPortE
             System.err.println(e);
         }    
     }
+    // 🛡️ Added by Jake for ESC/POS direct printing
+public OutputStream getRawOutputStream() {
+    return m_out;
+}
 }

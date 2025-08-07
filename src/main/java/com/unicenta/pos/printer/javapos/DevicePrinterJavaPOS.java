@@ -277,4 +277,6 @@ public class DevicePrinterJavaPOS  implements DevicePrinter {
         
         super.finalize();
     }    
+
+    
 }

@@ -165,4 +165,3 @@ public class DevicePrinterPlain implements DevicePrinter  {
        public void openDrawer() {
     }
 }
-

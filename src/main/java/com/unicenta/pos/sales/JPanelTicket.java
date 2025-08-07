@@ -35,6 +35,9 @@ import com.unicenta.data.loader.SentenceList;
 import com.unicenta.plugins.Application;
 import com.unicenta.pos.catalog.JCatalog;
 import com.unicenta.pos.customers.*;
+import com.unicenta.pos.einvoice.ECFData;
+import com.unicenta.pos.einvoice.ECFMapper;
+import com.unicenta.pos.einvoice.ECFXMLBuilder;
 import com.unicenta.pos.forms.*;
 import com.unicenta.pos.inventory.ProductStock;
 import com.unicenta.pos.inventory.TaxCategoryInfo;
@@ -81,6 +84,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import com.unicenta.pos.ticket.CategoryInfo;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * @author JG uniCenta
@@ -337,6 +346,19 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
       }
     }
   // Start Changes - Sumit
+  jComboTipoECF.addItem("31 - Factura Crédito Fiscal");
+jComboTipoECF.addItem("32 - Factura Consumo");
+jComboTipoECF.addItem("33 - Nota Débito");
+jComboTipoECF.addItem("34 - Nota Crédito");
+jComboTipoECF.addItem("41 - Compras Electrónica");
+jComboTipoECF.addItem("43 - Gastos Menores");
+jComboTipoECF.addItem("44 - Régimen Especial");
+jComboTipoECF.addItem("45 - Gubernamental");
+jComboTipoECF.addItem("46 - Exportación");
+jComboTipoECF.addItem("47 - Pago Exterior");
+
+// Optional: default selection
+jComboTipoECF.setSelectedIndex(1); // Default to "32 - Factura Consumo"
   String db_password = (AppConfig.getInstance().getProperty("db.password"));
         if (AppConfig.getInstance().getProperty("db.user") != null 
                 && db_password != null 
@@ -604,6 +626,17 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
       jComboSelectDay.setSelectedItem(m_oTicket.getDay() );
       jComboPickUpTime.setSelectedItem(m_oTicket.getPickupTime() );
       jOrderNo.setText(m_oTicket.getOrderNo());
+      String tipoECF = m_oTicket.getProperty("tipo_ecf");
+if (tipoECF != null) {
+    for (int i = 0; i < jComboTipoECF.getItemCount(); i++) {
+        String item = jComboTipoECF.getItemAt(i);
+        if (item.startsWith(tipoECF + " ")) {
+            jComboTipoECF.setSelectedIndex(i);
+            break;
+        }
+    }
+}
+
       //newcode
       repaint();
       // End Changes Sumit 
@@ -697,7 +730,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
         else if 
                 ("Friday".equals(dayWeekText))
         {
-           jComboSelectDay.setSelectedItem("Friday");
+           S.setSelectedItem("Friday");
         }*/
            /* End Changes */
       
@@ -705,6 +738,8 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
       jComboOrderType.setSelectedIndex(0);
       jComboNcfType.setSelectedIndex(0);
       jOrderNo.setText(null);
+      jComboTipoECF.setSelectedIndex(1);
+
       checkStock();
       stateToZero();
       repaint();
@@ -869,7 +904,9 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
 //            if (oProduct.getID().equals("xxx999_999xxx_x9x9x9")){
 //                m_jEditLine.doClick();
 //            }
-      refreshTicket();
+// Update service charge after adding the product
+    updateServiceCharge();      
+refreshTicket();
 
     }
 
@@ -990,7 +1027,8 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
             }
           }
         }
-
+// Update service charge after adding the product
+    updateServiceCharge();
         visorTicketLine(null);
         printPartialTotals();
         stateToZero();
@@ -1922,7 +1960,34 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
       listener.stop();
     }
     boolean resultok = false;
+//Sumit Start Changes
+double taxAmount = m_oTicket.getTax();
+String selectedNcfType = (String) jComboNcfType.getSelectedItem();
+if (jComboTipoECF.getSelectedItem() != null) {
+    String tipoText = jComboTipoECF.getSelectedItem().toString(); // e.g., "31 - Factura Crédito Fiscal"
+    String tipoECF = tipoText.split(" - ")[0]; // Just "31"
+    ticket.setProperty("tipoecf", tipoECF);
+}
+// Validation logic
+    if (taxAmount == 0) {
+        // Check if the selected NCF type is "REGIMENES ESPECIALES"
+        if (!"REGIMENES ESPECIALES".equals(selectedNcfType)) {
+            // Show a warning message with Yes and No options
+            int response = JOptionPane.showConfirmDialog(this, 
+                "The tax amount is zero. The NCF type should be 'REGIMENES ESPECIALES'. Do you want to proceed?", 
+                "Warning", 
+                JOptionPane.YES_NO_OPTION, 
+                JOptionPane.WARNING_MESSAGE);
 
+            // Handle the user's response
+            if (response != JOptionPane.YES_OPTION) {
+                // If the user selects No, cancel the save operation
+                return false;
+            }
+        }
+    } 
+
+//Sumit End Changes
     if (m_App.getAppUserView().getUser().hasPermission("sales.Total")) {
 
       warrantyCheck(ticket);
@@ -1947,7 +2012,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
           paymentdialog.setPrintSelected("true".equals(m_jbtnconfig.getProperty("printselected", "true")));
 
           paymentdialog.setTransactionID(ticket.getTransactionID());
-
+          //paymentdialog.setTicketInfo(ticket);//sumit
           if (paymentdialog.showDialog(ticket.getTotal(), ticket.getCustomer())) {
 
             ticket.setPayments(paymentdialog.getSelectedPayments());
@@ -1969,11 +2034,27 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
             if (executeEvent(ticket, ticketext, "ticket.save") == null) {
 
               try {
+                  // 🥷 Capture selected value
+String tipoECFSelection = (String) jComboTipoECF.getSelectedItem();
+String encfTipo = tipoECFSelection.substring(0, 2); // "31", "32", etc.
+
+// 🧠 Save to ticket
+ticket.setProperty("encf_tipo", encfTipo);
                 dlSales.saveTicket(ticket, m_App.getInventoryLocation());
                 m_config.setProperty("lastticket.number", Integer.toString(ticket.getTicketId()));
                 m_config.setProperty("lastticket.type", Integer.toString(ticket.getTicketType()));
                 m_config.saveWithExistingProperties();
-
+                /*ECFData ecfData = ECFMapper.fromTicket(ticket, m_App); // <-- coming next
+    String xml = "";
+                  try {
+                      xml = ECFXMLBuilder.buildECFXML(ecfData);
+                  } catch (Exception ex) {
+                      Logger.getLogger(JPanelTicket.class.getName()).log(Level.SEVERE, null, ex);
+                  }
+    String ticketId = String.valueOf(ticket.getTicketId());
+    String xmlPath = "/" + ticketId + "_signed.xml";
+                  Path write = Files.write(Paths.get(xmlPath), xml.getBytes(StandardCharsets.UTF_8));
+*/
               } catch (BasicException eData) {
                 MessageInf msg = new MessageInf(MessageInf.SGN_NOTICE, AppLocal.getIntString("message.nosaveticket"), eData);
                 msg.show(this);
@@ -2510,8 +2591,8 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
    * WARNING: Do NOT modify this code. The content of this method is
    * always regenerated by the FormEditor.
    */
-  // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
-  private void initComponents() {
+    // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
+    private void initComponents() {
 
         buttonGroup2 = new javax.swing.ButtonGroup();
         m_jPanContainer = new javax.swing.JPanel();
@@ -2530,6 +2611,10 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
         jRadioButton4 = new javax.swing.JRadioButton();
         jOrderNo = new javax.swing.JTextField();
         jLabel2 = new javax.swing.JLabel();
+        jScrollBar1 = new javax.swing.JScrollBar();
+        jLabel6 = new javax.swing.JLabel();
+        jLabel7 = new javax.swing.JLabel();
+        jComboTipoECF = new javax.swing.JComboBox<>();
         m_jOptions = new javax.swing.JPanel();
         m_jPanelBag = new javax.swing.JPanel();
         jTBtnShow = new javax.swing.JToggleButton();
@@ -2581,14 +2666,15 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
         setPreferredSize(new java.awt.Dimension(985, 480));
         setLayout(new java.awt.CardLayout());
 
-    m_jPanContainer.addFocusListener(new java.awt.event.FocusAdapter() {
-      public void focusLost(java.awt.event.FocusEvent evt) {
-        m_jPanContainerFocusLost(evt);
-      }
-    });
-    m_jPanContainer.setLayout(new java.awt.BorderLayout());
+        m_jPanContainer.addFocusListener(new java.awt.event.FocusAdapter() {
+            public void focusLost(java.awt.event.FocusEvent evt) {
+                m_jPanContainerFocusLost(evt);
+            }
+        });
+        m_jPanContainer.setLayout(new java.awt.BorderLayout());
 
         jPanel3.setBorder(javax.swing.BorderFactory.createTitledBorder(null, "ORDER DETAILS", javax.swing.border.TitledBorder.CENTER, javax.swing.border.TitledBorder.DEFAULT_POSITION));
+        jPanel3.setAutoscrolls(true);
         jPanel3.setMinimumSize(new java.awt.Dimension(290, 350));
         jPanel3.setPreferredSize(new java.awt.Dimension(290, 350));
         jPanel3.setLayout(new org.netbeans.lib.awtextra.AbsoluteLayout());
@@ -2599,40 +2685,40 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
                 jComboSelectDayActionPerformed(evt);
             }
         });
-        jPanel3.add(jComboSelectDay, new org.netbeans.lib.awtextra.AbsoluteConstraints(130, 70, 154, -1));
+        jPanel3.add(jComboSelectDay, new org.netbeans.lib.awtextra.AbsoluteConstraints(90, 60, 154, -1));
 
         jLabel3.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
         jLabel3.setText("SELECT DAY :");
-        jPanel3.add(jLabel3, new org.netbeans.lib.awtextra.AbsoluteConstraints(30, 70, 80, -1));
+        jPanel3.add(jLabel3, new org.netbeans.lib.awtextra.AbsoluteConstraints(0, 60, 80, -1));
 
         jLabel1.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
         jLabel1.setText("PICKUP TIME :");
-        jPanel3.add(jLabel1, new org.netbeans.lib.awtextra.AbsoluteConstraints(20, 110, 90, -1));
+        jPanel3.add(jLabel1, new org.netbeans.lib.awtextra.AbsoluteConstraints(0, 90, 90, -1));
 
-        jPanel3.add(jComboPickUpTime, new org.netbeans.lib.awtextra.AbsoluteConstraints(130, 110, 154, -1));
+        jPanel3.add(jComboPickUpTime, new org.netbeans.lib.awtextra.AbsoluteConstraints(90, 90, 154, -1));
 
         jLabel4.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
         jLabel4.setText("ORDER TYPE :");
-        jPanel3.add(jLabel4, new org.netbeans.lib.awtextra.AbsoluteConstraints(30, 30, -1, -1));
+        jPanel3.add(jLabel4, new org.netbeans.lib.awtextra.AbsoluteConstraints(10, 30, -1, -1));
 
-        jComboOrderType.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "TAKE OUT", "UBER", "PEDIDOSYA" }));
+        jComboOrderType.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "DINE-IN", "TAKE OUT", "UBER", "PEDIDOSYA" }));
         jComboOrderType.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 jComboOrderTypeActionPerformed(evt);
             }
         });
-        jPanel3.add(jComboOrderType, new org.netbeans.lib.awtextra.AbsoluteConstraints(130, 30, 154, -1));
+        jPanel3.add(jComboOrderType, new org.netbeans.lib.awtextra.AbsoluteConstraints(90, 30, 154, -1));
 
         jLabel5.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
-        jLabel5.setText("NCF TYPE :");
-        jPanel3.add(jLabel5, new org.netbeans.lib.awtextra.AbsoluteConstraints(40, 150, -1, -1));
+        jLabel5.setText("E-CF TYPE :");
+        jPanel3.add(jLabel5, new org.netbeans.lib.awtextra.AbsoluteConstraints(20, 320, 60, -1));
 
         jComboNcfType.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 jComboNcfTypeActionPerformed(evt);
             }
         });
-        jPanel3.add(jComboNcfType, new org.netbeans.lib.awtextra.AbsoluteConstraints(130, 150, 154, -1));
+        jPanel3.add(jComboNcfType, new org.netbeans.lib.awtextra.AbsoluteConstraints(90, 120, 154, -1));
 
         buttonGroup2.add(jRadioButton1);
         jRadioButton1.setFont(new java.awt.Font("Tahoma", 1, 14)); // NOI18N
@@ -2646,15 +2732,19 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
                 jRadioButton1ActionPerformed(evt);
             }
         });
-        jPanel3.add(jRadioButton1, new org.netbeans.lib.awtextra.AbsoluteConstraints(30, 200, 120, 50));
+        jPanel3.add(jRadioButton1, new org.netbeans.lib.awtextra.AbsoluteConstraints(20, 150, 100, 40));
 
         buttonGroup2.add(jRadioButton2);
         jRadioButton2.setFont(new java.awt.Font("Tahoma", 1, 14)); // NOI18N
-        jRadioButton2.setText("CATERING  ");
+        jRadioButton2.setText("DINE-IN");
         jRadioButton2.setBorder(javax.swing.BorderFactory.createBevelBorder(javax.swing.border.BevelBorder.RAISED));
         jRadioButton2.setBorderPainted(true);
-        jRadioButton2.setEnabled(false);
-        jPanel3.add(jRadioButton2, new org.netbeans.lib.awtextra.AbsoluteConstraints(150, 200, 120, 50));
+        jRadioButton2.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jRadioButton2ActionPerformed(evt);
+            }
+        });
+        jPanel3.add(jRadioButton2, new org.netbeans.lib.awtextra.AbsoluteConstraints(120, 150, 110, 40));
 
         buttonGroup2.add(jRadioButton3);
         jRadioButton3.setFont(new java.awt.Font("Tahoma", 1, 14)); // NOI18N
@@ -2666,7 +2756,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
                 jRadioButton3ActionPerformed(evt);
             }
         });
-        jPanel3.add(jRadioButton3, new org.netbeans.lib.awtextra.AbsoluteConstraints(30, 250, 120, 50));
+        jPanel3.add(jRadioButton3, new org.netbeans.lib.awtextra.AbsoluteConstraints(20, 190, 100, 40));
 
         buttonGroup2.add(jRadioButton4);
         jRadioButton4.setFont(new java.awt.Font("Tahoma", 1, 14)); // NOI18N
@@ -2678,488 +2768,505 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
                 jRadioButton4ActionPerformed(evt);
             }
         });
-        jPanel3.add(jRadioButton4, new org.netbeans.lib.awtextra.AbsoluteConstraints(150, 250, 120, 50));
-        jPanel3.add(jOrderNo, new org.netbeans.lib.awtextra.AbsoluteConstraints(30, 340, 240, 40));
+        jPanel3.add(jRadioButton4, new org.netbeans.lib.awtextra.AbsoluteConstraints(120, 190, 110, 40));
+        jPanel3.add(jOrderNo, new org.netbeans.lib.awtextra.AbsoluteConstraints(10, 260, 240, 40));
 
         jLabel2.setFont(new java.awt.Font("Tahoma", 1, 14)); // NOI18N
         jLabel2.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
         jLabel2.setText("UBER/HUGO ORDER NO.:");
         jLabel2.setHorizontalTextPosition(javax.swing.SwingConstants.CENTER);
-        jPanel3.add(jLabel2, new org.netbeans.lib.awtextra.AbsoluteConstraints(0, 310, 290, 20));
+        jPanel3.add(jLabel2, new org.netbeans.lib.awtextra.AbsoluteConstraints(20, 240, 220, 20));
+        jPanel3.add(jScrollBar1, new org.netbeans.lib.awtextra.AbsoluteConstraints(270, 10, -1, 350));
+
+        jLabel6.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+        jLabel6.setText("NCF TYPE :");
+        jPanel3.add(jLabel6, new org.netbeans.lib.awtextra.AbsoluteConstraints(20, 120, -1, -1));
+
+        jLabel7.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+        jLabel7.setText("NCF TYPE :");
+        jPanel3.add(jLabel7, new org.netbeans.lib.awtextra.AbsoluteConstraints(20, 120, -1, -1));
+
+        jComboTipoECF.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jComboTipoECFActionPerformed(evt);
+            }
+        });
+        jPanel3.add(jComboTipoECF, new org.netbeans.lib.awtextra.AbsoluteConstraints(90, 320, 154, -1));
 
         m_jPanContainer.add(jPanel3, java.awt.BorderLayout.WEST);
 
         m_jOptions.setLayout(new java.awt.BorderLayout());
 
-    m_jPanelBag.setAutoscrolls(true);
-    m_jPanelBag.setMaximumSize(new java.awt.Dimension(10, 10));
-    m_jPanelBag.setPreferredSize(new java.awt.Dimension(0, 60));
+        m_jPanelBag.setAutoscrolls(true);
+        m_jPanelBag.setMaximumSize(new java.awt.Dimension(10, 10));
+        m_jPanelBag.setPreferredSize(new java.awt.Dimension(0, 60));
 
-    jTBtnShow.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
-    jTBtnShow.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/resources.png"))); // NOI18N
-    jTBtnShow.setPreferredSize(new java.awt.Dimension(80, 45));
-    jTBtnShow.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        jTBtnShowActionPerformed(evt);
-      }
-    });
-    m_jPanelBag.add(jTBtnShow);
+        jTBtnShow.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
+        jTBtnShow.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/resources.png"))); // NOI18N
+        jTBtnShow.setPreferredSize(new java.awt.Dimension(80, 45));
+        jTBtnShow.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jTBtnShowActionPerformed(evt);
+            }
+        });
+        m_jPanelBag.add(jTBtnShow);
 
-    m_jbtnScale.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
-    m_jbtnScale.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/scale.png"))); // NOI18N
-    m_jbtnScale.setText(AppLocal.getIntString("button.scale")); // NOI18N
-    java.util.ResourceBundle bundle = java.util.ResourceBundle.getBundle("pos_messages"); // NOI18N
-    m_jbtnScale.setToolTipText(bundle.getString("tooltip.scale")); // NOI18N
-    m_jbtnScale.setFocusPainted(false);
-    m_jbtnScale.setFocusable(false);
-    m_jbtnScale.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    m_jbtnScale.setMaximumSize(new java.awt.Dimension(85, 44));
-    m_jbtnScale.setMinimumSize(new java.awt.Dimension(85, 44));
-    m_jbtnScale.setPreferredSize(new java.awt.Dimension(85, 45));
-    m_jbtnScale.setRequestFocusEnabled(false);
-    m_jbtnScale.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        m_jbtnScaleActionPerformed(evt);
-      }
-    });
-    m_jPanelBag.add(m_jbtnScale);
+        m_jbtnScale.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
+        m_jbtnScale.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/scale.png"))); // NOI18N
+        m_jbtnScale.setText(AppLocal.getIntString("button.scale")); // NOI18N
+        java.util.ResourceBundle bundle = java.util.ResourceBundle.getBundle("pos_messages"); // NOI18N
+        m_jbtnScale.setToolTipText(bundle.getString("tooltip.scale")); // NOI18N
+        m_jbtnScale.setFocusPainted(false);
+        m_jbtnScale.setFocusable(false);
+        m_jbtnScale.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        m_jbtnScale.setMaximumSize(new java.awt.Dimension(85, 44));
+        m_jbtnScale.setMinimumSize(new java.awt.Dimension(85, 44));
+        m_jbtnScale.setPreferredSize(new java.awt.Dimension(85, 45));
+        m_jbtnScale.setRequestFocusEnabled(false);
+        m_jbtnScale.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                m_jbtnScaleActionPerformed(evt);
+            }
+        });
+        m_jPanelBag.add(m_jbtnScale);
 
-    jbtnMooring.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
-    jbtnMooring.setText(bundle.getString("button.moorings")); // NOI18N
-    jbtnMooring.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    jbtnMooring.setMaximumSize(new java.awt.Dimension(80, 40));
-    jbtnMooring.setMinimumSize(new java.awt.Dimension(80, 40));
-    jbtnMooring.setPreferredSize(new java.awt.Dimension(80, 45));
-    jbtnMooring.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        jbtnMooringActionPerformed(evt);
-      }
-    });
-    m_jPanelBag.add(jbtnMooring);
+        jbtnMooring.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
+        jbtnMooring.setText(bundle.getString("button.moorings")); // NOI18N
+        jbtnMooring.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        jbtnMooring.setMaximumSize(new java.awt.Dimension(80, 40));
+        jbtnMooring.setMinimumSize(new java.awt.Dimension(80, 40));
+        jbtnMooring.setPreferredSize(new java.awt.Dimension(80, 45));
+        jbtnMooring.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbtnMooringActionPerformed(evt);
+            }
+        });
+        m_jPanelBag.add(jbtnMooring);
 
-    m_jButtons.setPreferredSize(new java.awt.Dimension(350, 55));
+        m_jButtons.setPreferredSize(new java.awt.Dimension(350, 55));
 
-    btnSplit.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/sale_split_sml.png"))); // NOI18N
-    btnSplit.setToolTipText(bundle.getString("tooltip.salesplit")); // NOI18N
-    btnSplit.setEnabled(false);
-    btnSplit.setFocusPainted(false);
-    btnSplit.setFocusable(false);
-    btnSplit.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    btnSplit.setMaximumSize(new java.awt.Dimension(50, 40));
-    btnSplit.setMinimumSize(new java.awt.Dimension(50, 40));
-    btnSplit.setPreferredSize(new java.awt.Dimension(80, 45));
-    btnSplit.setRequestFocusEnabled(false);
-    btnSplit.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        btnSplitActionPerformed(evt);
-      }
-    });
+        btnSplit.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/sale_split_sml.png"))); // NOI18N
+        btnSplit.setToolTipText(bundle.getString("tooltip.salesplit")); // NOI18N
+        btnSplit.setEnabled(false);
+        btnSplit.setFocusPainted(false);
+        btnSplit.setFocusable(false);
+        btnSplit.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        btnSplit.setMaximumSize(new java.awt.Dimension(50, 40));
+        btnSplit.setMinimumSize(new java.awt.Dimension(50, 40));
+        btnSplit.setPreferredSize(new java.awt.Dimension(80, 45));
+        btnSplit.setRequestFocusEnabled(false);
+        btnSplit.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnSplitActionPerformed(evt);
+            }
+        });
 
-    btnReprint1.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
-    btnReprint1.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/reprint24.png"))); // NOI18N
-    btnReprint1.setToolTipText(bundle.getString("tooltip.reprintLastTicket")); // NOI18N
-    btnReprint1.setFocusPainted(false);
-    btnReprint1.setFocusable(false);
-    btnReprint1.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    btnReprint1.setMaximumSize(new java.awt.Dimension(50, 40));
-    btnReprint1.setMinimumSize(new java.awt.Dimension(50, 40));
-    btnReprint1.setPreferredSize(new java.awt.Dimension(80, 45));
-    btnReprint1.setRequestFocusEnabled(false);
-    btnReprint1.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        btnReprint1ActionPerformed(evt);
-      }
-    });
+        btnReprint1.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
+        btnReprint1.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/reprint24.png"))); // NOI18N
+        btnReprint1.setToolTipText(bundle.getString("tooltip.reprintLastTicket")); // NOI18N
+        btnReprint1.setFocusPainted(false);
+        btnReprint1.setFocusable(false);
+        btnReprint1.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        btnReprint1.setMaximumSize(new java.awt.Dimension(50, 40));
+        btnReprint1.setMinimumSize(new java.awt.Dimension(50, 40));
+        btnReprint1.setPreferredSize(new java.awt.Dimension(80, 45));
+        btnReprint1.setRequestFocusEnabled(false);
+        btnReprint1.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnReprint1ActionPerformed(evt);
+            }
+        });
 
-    j_btnRemotePrt.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
-    j_btnRemotePrt.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/remote_print.png"))); // NOI18N
-    j_btnRemotePrt.setText(bundle.getString("button.sendorder")); // NOI18N
-    j_btnRemotePrt.setToolTipText(bundle.getString("tooltip.printtoremote")); // NOI18N
-    j_btnRemotePrt.setMargin(new java.awt.Insets(0, 4, 0, 4));
-    j_btnRemotePrt.setMaximumSize(new java.awt.Dimension(50, 40));
-    j_btnRemotePrt.setMinimumSize(new java.awt.Dimension(50, 40));
-    j_btnRemotePrt.setPreferredSize(new java.awt.Dimension(80, 45));
-    j_btnRemotePrt.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        j_btnRemotePrtActionPerformed(evt);
-      }
-    });
+        j_btnRemotePrt.setFont(new java.awt.Font("Tahoma", 0, 12)); // NOI18N
+        j_btnRemotePrt.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/remote_print.png"))); // NOI18N
+        j_btnRemotePrt.setText(bundle.getString("button.sendorder")); // NOI18N
+        j_btnRemotePrt.setToolTipText(bundle.getString("tooltip.printtoremote")); // NOI18N
+        j_btnRemotePrt.setMargin(new java.awt.Insets(0, 4, 0, 4));
+        j_btnRemotePrt.setMaximumSize(new java.awt.Dimension(50, 40));
+        j_btnRemotePrt.setMinimumSize(new java.awt.Dimension(50, 40));
+        j_btnRemotePrt.setPreferredSize(new java.awt.Dimension(80, 45));
+        j_btnRemotePrt.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                j_btnRemotePrtActionPerformed(evt);
+            }
+        });
 
-    jBtnCustomer.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
-    jBtnCustomer.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/customer.png"))); // NOI18N
-    jBtnCustomer.setToolTipText(bundle.getString("tooltip.salescustomer")); // NOI18N
-    jBtnCustomer.setPreferredSize(new java.awt.Dimension(80, 45));
-    jBtnCustomer.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        jBtnCustomerActionPerformed(evt);
-      }
-    });
+        jBtnCustomer.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
+        jBtnCustomer.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/customer.png"))); // NOI18N
+        jBtnCustomer.setToolTipText(bundle.getString("tooltip.salescustomer")); // NOI18N
+        jBtnCustomer.setPreferredSize(new java.awt.Dimension(80, 45));
+        jBtnCustomer.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jBtnCustomerActionPerformed(evt);
+            }
+        });
 
-    javax.swing.GroupLayout m_jButtonsLayout = new javax.swing.GroupLayout(m_jButtons);
-    m_jButtons.setLayout(m_jButtonsLayout);
-    m_jButtonsLayout.setHorizontalGroup(
+        javax.swing.GroupLayout m_jButtonsLayout = new javax.swing.GroupLayout(m_jButtons);
+        m_jButtons.setLayout(m_jButtonsLayout);
+        m_jButtonsLayout.setHorizontalGroup(
             m_jButtonsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(m_jButtonsLayout.createSequentialGroup()
-                            .addContainerGap()
-                            .addComponent(jBtnCustomer, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                            .addComponent(btnSplit, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                            .addComponent(j_btnRemotePrt, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                            .addComponent(btnReprint1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-    );
-    m_jButtonsLayout.setVerticalGroup(
+            .addGroup(m_jButtonsLayout.createSequentialGroup()
+                .addContainerGap()
+                .addComponent(jBtnCustomer, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(btnSplit, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(j_btnRemotePrt, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(btnReprint1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+        );
+        m_jButtonsLayout.setVerticalGroup(
             m_jButtonsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(m_jButtonsLayout.createSequentialGroup()
-                            .addGap(5, 5, 5)
-                            .addGroup(m_jButtonsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                                    .addComponent(j_btnRemotePrt, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                    .addComponent(btnSplit, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                    .addComponent(btnReprint1, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                    .addComponent(jBtnCustomer, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                            .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-    );
+            .addGroup(m_jButtonsLayout.createSequentialGroup()
+                .addGap(5, 5, 5)
+                .addGroup(m_jButtonsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(j_btnRemotePrt, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(btnSplit, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(btnReprint1, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(jBtnCustomer, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+        );
 
-    m_jPanelBag.add(m_jButtons);
+        m_jPanelBag.add(m_jButtons);
 
-    m_jOptions.add(m_jPanelBag, java.awt.BorderLayout.PAGE_START);
+        m_jOptions.add(m_jPanelBag, java.awt.BorderLayout.PAGE_START);
 
-    m_jPanelScripts.setPreferredSize(new java.awt.Dimension(200, 60));
-    m_jPanelScripts.setLayout(new java.awt.BorderLayout());
+        m_jPanelScripts.setPreferredSize(new java.awt.Dimension(200, 60));
+        m_jPanelScripts.setLayout(new java.awt.BorderLayout());
 
-    m_jButtonsExt.setPreferredSize(new java.awt.Dimension(20, 60));
+        m_jButtonsExt.setPreferredSize(new java.awt.Dimension(20, 60));
 
-    jPanel1.setMinimumSize(new java.awt.Dimension(235, 50));
-    jPanel1.setPreferredSize(new java.awt.Dimension(10, 55));
-    m_jButtonsExt.add(jPanel1);
+        jPanel1.setMinimumSize(new java.awt.Dimension(235, 50));
+        jPanel1.setPreferredSize(new java.awt.Dimension(10, 55));
+        m_jButtonsExt.add(jPanel1);
 
-    m_jPanelScripts.add(m_jButtonsExt, java.awt.BorderLayout.PAGE_START);
+        m_jPanelScripts.add(m_jButtonsExt, java.awt.BorderLayout.PAGE_START);
 
-    m_jOptions.add(m_jPanelScripts, java.awt.BorderLayout.CENTER);
-    m_jPanelScripts.getAccessibleContext().setAccessibleDescription("");
+        m_jOptions.add(m_jPanelScripts, java.awt.BorderLayout.CENTER);
+        m_jPanelScripts.getAccessibleContext().setAccessibleDescription("");
 
-    m_jPanContainer.add(m_jOptions, java.awt.BorderLayout.NORTH);
+        m_jPanContainer.add(m_jOptions, java.awt.BorderLayout.NORTH);
 
-    m_jPanTicket.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
-    m_jPanTicket.setLayout(new java.awt.BorderLayout());
+        m_jPanTicket.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        m_jPanTicket.setLayout(new java.awt.BorderLayout());
 
-    jPanel5.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
-    jPanel5.setPreferredSize(new java.awt.Dimension(75, 270));
-    jPanel5.setLayout(new java.awt.BorderLayout());
+        jPanel5.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
+        jPanel5.setPreferredSize(new java.awt.Dimension(75, 270));
+        jPanel5.setLayout(new java.awt.BorderLayout());
 
-    jPanel2.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 5, 0, 5));
-    jPanel2.setPreferredSize(new java.awt.Dimension(70, 250));
-    jPanel2.setLayout(new java.awt.GridLayout(0, 1, 5, 5));
+        jPanel2.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 5, 0, 5));
+        jPanel2.setPreferredSize(new java.awt.Dimension(70, 250));
+        jPanel2.setLayout(new java.awt.GridLayout(0, 1, 5, 5));
 
-    m_jDelete.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/editdelete.png"))); // NOI18N
-    m_jDelete.setToolTipText(bundle.getString("tooltip.saleremoveline")); // NOI18N
-    m_jDelete.setFocusPainted(false);
-    m_jDelete.setFocusable(false);
-    m_jDelete.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    m_jDelete.setMaximumSize(new java.awt.Dimension(42, 36));
-    m_jDelete.setMinimumSize(new java.awt.Dimension(42, 36));
-    m_jDelete.setPreferredSize(new java.awt.Dimension(50, 45));
-    m_jDelete.setRequestFocusEnabled(false);
-    m_jDelete.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        m_jDeleteActionPerformed(evt);
-      }
-    });
-    jPanel2.add(m_jDelete);
+        m_jDelete.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/editdelete.png"))); // NOI18N
+        m_jDelete.setToolTipText(bundle.getString("tooltip.saleremoveline")); // NOI18N
+        m_jDelete.setFocusPainted(false);
+        m_jDelete.setFocusable(false);
+        m_jDelete.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        m_jDelete.setMaximumSize(new java.awt.Dimension(42, 36));
+        m_jDelete.setMinimumSize(new java.awt.Dimension(42, 36));
+        m_jDelete.setPreferredSize(new java.awt.Dimension(50, 45));
+        m_jDelete.setRequestFocusEnabled(false);
+        m_jDelete.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                m_jDeleteActionPerformed(evt);
+            }
+        });
+        jPanel2.add(m_jDelete);
 
-    m_jList.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/search32.png"))); // NOI18N
-    m_jList.setToolTipText(bundle.getString("tooltip.saleproductfind")); // NOI18N
-    m_jList.setFocusPainted(false);
-    m_jList.setFocusable(false);
-    m_jList.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    m_jList.setMaximumSize(new java.awt.Dimension(42, 36));
-    m_jList.setMinimumSize(new java.awt.Dimension(42, 36));
-    m_jList.setPreferredSize(new java.awt.Dimension(50, 45));
-    m_jList.setRequestFocusEnabled(false);
-    m_jList.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        m_jListActionPerformed(evt);
-      }
-    });
-    jPanel2.add(m_jList);
+        m_jList.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/search32.png"))); // NOI18N
+        m_jList.setToolTipText(bundle.getString("tooltip.saleproductfind")); // NOI18N
+        m_jList.setFocusPainted(false);
+        m_jList.setFocusable(false);
+        m_jList.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        m_jList.setMaximumSize(new java.awt.Dimension(42, 36));
+        m_jList.setMinimumSize(new java.awt.Dimension(42, 36));
+        m_jList.setPreferredSize(new java.awt.Dimension(50, 45));
+        m_jList.setRequestFocusEnabled(false);
+        m_jList.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                m_jListActionPerformed(evt);
+            }
+        });
+        jPanel2.add(m_jList);
 
-    m_jEditLine.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/sale_editline.png"))); // NOI18N
-    m_jEditLine.setToolTipText(bundle.getString("tooltip.saleeditline")); // NOI18N
-    m_jEditLine.setFocusPainted(false);
-    m_jEditLine.setFocusable(false);
-    m_jEditLine.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    m_jEditLine.setMaximumSize(new java.awt.Dimension(42, 36));
-    m_jEditLine.setMinimumSize(new java.awt.Dimension(42, 36));
-    m_jEditLine.setPreferredSize(new java.awt.Dimension(50, 45));
-    m_jEditLine.setRequestFocusEnabled(false);
-    m_jEditLine.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        m_jEditLineActionPerformed(evt);
-      }
-    });
-    jPanel2.add(m_jEditLine);
+        m_jEditLine.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/sale_editline.png"))); // NOI18N
+        m_jEditLine.setToolTipText(bundle.getString("tooltip.saleeditline")); // NOI18N
+        m_jEditLine.setFocusPainted(false);
+        m_jEditLine.setFocusable(false);
+        m_jEditLine.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        m_jEditLine.setMaximumSize(new java.awt.Dimension(42, 36));
+        m_jEditLine.setMinimumSize(new java.awt.Dimension(42, 36));
+        m_jEditLine.setPreferredSize(new java.awt.Dimension(50, 45));
+        m_jEditLine.setRequestFocusEnabled(false);
+        m_jEditLine.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                m_jEditLineActionPerformed(evt);
+            }
+        });
+        jPanel2.add(m_jEditLine);
 
-    jEditAttributes.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/attributes.png"))); // NOI18N
-    jEditAttributes.setToolTipText(bundle.getString("tooltip.saleattributes")); // NOI18N
-    jEditAttributes.setFocusPainted(false);
-    jEditAttributes.setFocusable(false);
-    jEditAttributes.setMargin(new java.awt.Insets(8, 14, 8, 14));
-    jEditAttributes.setMaximumSize(new java.awt.Dimension(42, 36));
-    jEditAttributes.setMinimumSize(new java.awt.Dimension(42, 36));
-    jEditAttributes.setPreferredSize(new java.awt.Dimension(50, 45));
-    jEditAttributes.setRequestFocusEnabled(false);
-    jEditAttributes.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        jEditAttributesActionPerformed(evt);
-      }
-    });
-    jPanel2.add(jEditAttributes);
+        jEditAttributes.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/attributes.png"))); // NOI18N
+        jEditAttributes.setToolTipText(bundle.getString("tooltip.saleattributes")); // NOI18N
+        jEditAttributes.setFocusPainted(false);
+        jEditAttributes.setFocusable(false);
+        jEditAttributes.setMargin(new java.awt.Insets(8, 14, 8, 14));
+        jEditAttributes.setMaximumSize(new java.awt.Dimension(42, 36));
+        jEditAttributes.setMinimumSize(new java.awt.Dimension(42, 36));
+        jEditAttributes.setPreferredSize(new java.awt.Dimension(50, 45));
+        jEditAttributes.setRequestFocusEnabled(false);
+        jEditAttributes.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jEditAttributesActionPerformed(evt);
+            }
+        });
+        jPanel2.add(jEditAttributes);
 
-    jCheckStock.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
-    jCheckStock.setForeground(new java.awt.Color(76, 197, 237));
-    jCheckStock.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/info.png"))); // NOI18N
-    jCheckStock.setToolTipText(bundle.getString("tooltip.salecheckstock")); // NOI18N
-    jCheckStock.setFocusPainted(false);
-    jCheckStock.setFocusable(false);
-    jCheckStock.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
-    jCheckStock.setHorizontalTextPosition(javax.swing.SwingConstants.LEFT);
-    jCheckStock.setMargin(new java.awt.Insets(8, 4, 8, 4));
-    jCheckStock.setMaximumSize(new java.awt.Dimension(42, 36));
-    jCheckStock.setMinimumSize(new java.awt.Dimension(42, 36));
-    jCheckStock.setPreferredSize(new java.awt.Dimension(80, 45));
-    jCheckStock.setRequestFocusEnabled(false);
-    jCheckStock.setVerticalTextPosition(javax.swing.SwingConstants.TOP);
-    jCheckStock.addMouseListener(new java.awt.event.MouseAdapter() {
-      public void mouseClicked(java.awt.event.MouseEvent evt) {
-        jCheckStockMouseClicked(evt);
-      }
-    });
-    jCheckStock.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        jCheckStockActionPerformed(evt);
-      }
-    });
-    jPanel2.add(jCheckStock);
+        jCheckStock.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
+        jCheckStock.setForeground(new java.awt.Color(76, 197, 237));
+        jCheckStock.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/info.png"))); // NOI18N
+        jCheckStock.setToolTipText(bundle.getString("tooltip.salecheckstock")); // NOI18N
+        jCheckStock.setFocusPainted(false);
+        jCheckStock.setFocusable(false);
+        jCheckStock.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+        jCheckStock.setHorizontalTextPosition(javax.swing.SwingConstants.LEFT);
+        jCheckStock.setMargin(new java.awt.Insets(8, 4, 8, 4));
+        jCheckStock.setMaximumSize(new java.awt.Dimension(42, 36));
+        jCheckStock.setMinimumSize(new java.awt.Dimension(42, 36));
+        jCheckStock.setPreferredSize(new java.awt.Dimension(80, 45));
+        jCheckStock.setRequestFocusEnabled(false);
+        jCheckStock.setVerticalTextPosition(javax.swing.SwingConstants.TOP);
+        jCheckStock.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseClicked(java.awt.event.MouseEvent evt) {
+                jCheckStockMouseClicked(evt);
+            }
+        });
+        jCheckStock.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jCheckStockActionPerformed(evt);
+            }
+        });
+        jPanel2.add(jCheckStock);
 
-    jPanel5.add(jPanel2, java.awt.BorderLayout.NORTH);
+        jPanel5.add(jPanel2, java.awt.BorderLayout.NORTH);
 
-    m_jPanTicket.add(jPanel5, java.awt.BorderLayout.LINE_START);
+        m_jPanTicket.add(jPanel5, java.awt.BorderLayout.LINE_START);
 
-    m_jPanelCentral.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
-    m_jPanelCentral.setPreferredSize(new java.awt.Dimension(450, 240));
-    m_jPanelCentral.setLayout(new java.awt.BorderLayout());
+        m_jPanelCentral.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
+        m_jPanelCentral.setPreferredSize(new java.awt.Dimension(450, 240));
+        m_jPanelCentral.setLayout(new java.awt.BorderLayout());
 
-    jPanel4.setLayout(new java.awt.BorderLayout());
-    jPanel4.add(filler2, java.awt.BorderLayout.LINE_START);
+        jPanel4.setLayout(new java.awt.BorderLayout());
+        jPanel4.add(filler2, java.awt.BorderLayout.LINE_START);
 
-    m_jTicketId.setFont(new java.awt.Font("Arial", 1, 12)); // NOI18N
-    m_jTicketId.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
-    m_jTicketId.setVerticalAlignment(javax.swing.SwingConstants.TOP);
-    m_jTicketId.setOpaque(true);
-    m_jTicketId.setPreferredSize(new java.awt.Dimension(300, 40));
-    m_jTicketId.setRequestFocusEnabled(false);
-    m_jTicketId.setVerticalTextPosition(javax.swing.SwingConstants.TOP);
-    jPanel4.add(m_jTicketId, java.awt.BorderLayout.CENTER);
+        m_jTicketId.setFont(new java.awt.Font("Arial", 1, 12)); // NOI18N
+        m_jTicketId.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
+        m_jTicketId.setVerticalAlignment(javax.swing.SwingConstants.TOP);
+        m_jTicketId.setOpaque(true);
+        m_jTicketId.setPreferredSize(new java.awt.Dimension(300, 40));
+        m_jTicketId.setRequestFocusEnabled(false);
+        m_jTicketId.setVerticalTextPosition(javax.swing.SwingConstants.TOP);
+        jPanel4.add(m_jTicketId, java.awt.BorderLayout.CENTER);
 
-    m_jPanTotals.setPreferredSize(new java.awt.Dimension(375, 60));
-    m_jPanTotals.setLayout(new java.awt.GridLayout(2, 3, 4, 0));
+        m_jPanTotals.setPreferredSize(new java.awt.Dimension(375, 60));
+        m_jPanTotals.setLayout(new java.awt.GridLayout(2, 3, 4, 0));
 
-    m_jLblTotalEuros3.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
-    m_jLblTotalEuros3.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-    m_jLblTotalEuros3.setLabelFor(m_jSubtotalEuros);
-    m_jLblTotalEuros3.setText(AppLocal.getIntString("label.subtotalcash")); // NOI18N
-    m_jPanTotals.add(m_jLblTotalEuros3);
+        m_jLblTotalEuros3.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
+        m_jLblTotalEuros3.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        m_jLblTotalEuros3.setLabelFor(m_jSubtotalEuros);
+        m_jLblTotalEuros3.setText(AppLocal.getIntString("label.subtotalcash")); // NOI18N
+        m_jPanTotals.add(m_jLblTotalEuros3);
 
-    m_jLblTotalEuros2.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
-    m_jLblTotalEuros2.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-    m_jLblTotalEuros2.setLabelFor(m_jSubtotalEuros);
-    m_jLblTotalEuros2.setText(AppLocal.getIntString("label.taxcash")); // NOI18N
-    m_jPanTotals.add(m_jLblTotalEuros2);
+        m_jLblTotalEuros2.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
+        m_jLblTotalEuros2.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        m_jLblTotalEuros2.setLabelFor(m_jSubtotalEuros);
+        m_jLblTotalEuros2.setText(AppLocal.getIntString("label.taxcash")); // NOI18N
+        m_jPanTotals.add(m_jLblTotalEuros2);
 
-    m_jLblTotalEuros1.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
-    m_jLblTotalEuros1.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-    m_jLblTotalEuros1.setLabelFor(m_jTotalEuros);
-    m_jLblTotalEuros1.setText(AppLocal.getIntString("label.totalcash")); // NOI18N
-    m_jPanTotals.add(m_jLblTotalEuros1);
+        m_jLblTotalEuros1.setFont(new java.awt.Font("Arial", 1, 14)); // NOI18N
+        m_jLblTotalEuros1.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        m_jLblTotalEuros1.setLabelFor(m_jTotalEuros);
+        m_jLblTotalEuros1.setText(AppLocal.getIntString("label.totalcash")); // NOI18N
+        m_jPanTotals.add(m_jLblTotalEuros1);
 
-    m_jSubtotalEuros.setBackground(m_jEditLine.getBackground());
-    m_jSubtotalEuros.setFont(new java.awt.Font("Arial", 0, 18)); // NOI18N
-    m_jSubtotalEuros.setForeground(m_jEditLine.getForeground());
-    m_jSubtotalEuros.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-    m_jSubtotalEuros.setLabelFor(m_jSubtotalEuros);
-    m_jSubtotalEuros.setToolTipText(bundle.getString("tooltip.salesubtotal")); // NOI18N
-    m_jSubtotalEuros.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(153, 153, 153), 1, true));
-    m_jSubtotalEuros.setMaximumSize(new java.awt.Dimension(125, 25));
-    m_jSubtotalEuros.setMinimumSize(new java.awt.Dimension(80, 25));
-    m_jSubtotalEuros.setPreferredSize(new java.awt.Dimension(80, 25));
-    m_jSubtotalEuros.setRequestFocusEnabled(false);
-    m_jPanTotals.add(m_jSubtotalEuros);
+        m_jSubtotalEuros.setBackground(m_jEditLine.getBackground());
+        m_jSubtotalEuros.setFont(new java.awt.Font("Arial", 0, 18)); // NOI18N
+        m_jSubtotalEuros.setForeground(m_jEditLine.getForeground());
+        m_jSubtotalEuros.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        m_jSubtotalEuros.setLabelFor(m_jSubtotalEuros);
+        m_jSubtotalEuros.setToolTipText(bundle.getString("tooltip.salesubtotal")); // NOI18N
+        m_jSubtotalEuros.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(153, 153, 153), 1, true));
+        m_jSubtotalEuros.setMaximumSize(new java.awt.Dimension(125, 25));
+        m_jSubtotalEuros.setMinimumSize(new java.awt.Dimension(80, 25));
+        m_jSubtotalEuros.setPreferredSize(new java.awt.Dimension(80, 25));
+        m_jSubtotalEuros.setRequestFocusEnabled(false);
+        m_jPanTotals.add(m_jSubtotalEuros);
 
-    m_jTaxesEuros.setBackground(m_jEditLine.getBackground());
-    m_jTaxesEuros.setFont(new java.awt.Font("Arial", 0, 18)); // NOI18N
-    m_jTaxesEuros.setForeground(m_jEditLine.getForeground());
-    m_jTaxesEuros.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-    m_jTaxesEuros.setLabelFor(m_jTaxesEuros);
-    m_jTaxesEuros.setToolTipText(bundle.getString("tooltip.saletax")); // NOI18N
-    m_jTaxesEuros.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(153, 153, 153), 1, true));
-    m_jTaxesEuros.setMaximumSize(new java.awt.Dimension(125, 25));
-    m_jTaxesEuros.setMinimumSize(new java.awt.Dimension(80, 25));
-    m_jTaxesEuros.setPreferredSize(new java.awt.Dimension(80, 25));
-    m_jTaxesEuros.setRequestFocusEnabled(false);
-    m_jPanTotals.add(m_jTaxesEuros);
+        m_jTaxesEuros.setBackground(m_jEditLine.getBackground());
+        m_jTaxesEuros.setFont(new java.awt.Font("Arial", 0, 18)); // NOI18N
+        m_jTaxesEuros.setForeground(m_jEditLine.getForeground());
+        m_jTaxesEuros.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        m_jTaxesEuros.setLabelFor(m_jTaxesEuros);
+        m_jTaxesEuros.setToolTipText(bundle.getString("tooltip.saletax")); // NOI18N
+        m_jTaxesEuros.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(153, 153, 153), 1, true));
+        m_jTaxesEuros.setMaximumSize(new java.awt.Dimension(125, 25));
+        m_jTaxesEuros.setMinimumSize(new java.awt.Dimension(80, 25));
+        m_jTaxesEuros.setPreferredSize(new java.awt.Dimension(80, 25));
+        m_jTaxesEuros.setRequestFocusEnabled(false);
+        m_jPanTotals.add(m_jTaxesEuros);
 
-    m_jTotalEuros.setBackground(m_jEditLine.getBackground());
-    m_jTotalEuros.setFont(new java.awt.Font("Arial", 1, 18)); // NOI18N
-    m_jTotalEuros.setForeground(m_jEditLine.getForeground());
-    m_jTotalEuros.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-    m_jTotalEuros.setLabelFor(m_jTotalEuros);
-    m_jTotalEuros.setToolTipText(bundle.getString("tooltip.saletotal")); // NOI18N
-    m_jTotalEuros.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(153, 153, 153), 1, true));
-    m_jTotalEuros.setMaximumSize(new java.awt.Dimension(125, 25));
-    m_jTotalEuros.setMinimumSize(new java.awt.Dimension(80, 25));
-    m_jTotalEuros.setPreferredSize(new java.awt.Dimension(100, 25));
-    m_jTotalEuros.setRequestFocusEnabled(false);
-    m_jPanTotals.add(m_jTotalEuros);
+        m_jTotalEuros.setBackground(m_jEditLine.getBackground());
+        m_jTotalEuros.setFont(new java.awt.Font("Arial", 1, 18)); // NOI18N
+        m_jTotalEuros.setForeground(m_jEditLine.getForeground());
+        m_jTotalEuros.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        m_jTotalEuros.setLabelFor(m_jTotalEuros);
+        m_jTotalEuros.setToolTipText(bundle.getString("tooltip.saletotal")); // NOI18N
+        m_jTotalEuros.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(153, 153, 153), 1, true));
+        m_jTotalEuros.setMaximumSize(new java.awt.Dimension(125, 25));
+        m_jTotalEuros.setMinimumSize(new java.awt.Dimension(80, 25));
+        m_jTotalEuros.setPreferredSize(new java.awt.Dimension(100, 25));
+        m_jTotalEuros.setRequestFocusEnabled(false);
+        m_jPanTotals.add(m_jTotalEuros);
 
-    jPanel4.add(m_jPanTotals, java.awt.BorderLayout.LINE_END);
+        jPanel4.add(m_jPanTotals, java.awt.BorderLayout.LINE_END);
 
-    m_jPanelCentral.add(jPanel4, java.awt.BorderLayout.SOUTH);
+        m_jPanelCentral.add(jPanel4, java.awt.BorderLayout.SOUTH);
+        m_jPanelCentral.add(filler1, java.awt.BorderLayout.CENTER);
 
-    m_jPanTicket.add(m_jPanelCentral, java.awt.BorderLayout.CENTER);
+        m_jPanTicket.add(m_jPanelCentral, java.awt.BorderLayout.CENTER);
 
-    m_jPanContainer.add(m_jPanTicket, java.awt.BorderLayout.CENTER);
+        m_jPanContainer.add(m_jPanTicket, java.awt.BorderLayout.CENTER);
 
-    m_jContEntries.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
-    m_jContEntries.setMinimumSize(new java.awt.Dimension(300, 350));
-    m_jContEntries.setLayout(new java.awt.BorderLayout());
+        m_jContEntries.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
+        m_jContEntries.setMinimumSize(new java.awt.Dimension(300, 350));
+        m_jContEntries.setLayout(new java.awt.BorderLayout());
 
-    m_jPanEntries.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
-    m_jPanEntries.setPreferredSize(new java.awt.Dimension(300, 350));
-    m_jPanEntries.setLayout(new javax.swing.BoxLayout(m_jPanEntries, javax.swing.BoxLayout.Y_AXIS));
+        m_jPanEntries.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
+        m_jPanEntries.setPreferredSize(new java.awt.Dimension(300, 350));
+        m_jPanEntries.setLayout(new javax.swing.BoxLayout(m_jPanEntries, javax.swing.BoxLayout.Y_AXIS));
 
-    m_jNumberKeys.setMinimumSize(new java.awt.Dimension(300, 300));
-    m_jNumberKeys.setPreferredSize(new java.awt.Dimension(250, 250));
-    m_jNumberKeys.addJNumberEventListener(new com.unicenta.beans.JNumberEventListener() {
-      public void keyPerformed(com.unicenta.beans.JNumberEvent evt) {
-        m_jNumberKeysKeyPerformed(evt);
-      }
-    });
-    m_jPanEntries.add(m_jNumberKeys);
+        m_jNumberKeys.setMinimumSize(new java.awt.Dimension(300, 300));
+        m_jNumberKeys.setPreferredSize(new java.awt.Dimension(250, 250));
+        m_jNumberKeys.addJNumberEventListener(new com.unicenta.beans.JNumberEventListener() {
+            public void keyPerformed(com.unicenta.beans.JNumberEvent evt) {
+                m_jNumberKeysKeyPerformed(evt);
+            }
+        });
+        m_jPanEntries.add(m_jNumberKeys);
 
-    jPanel9.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        jPanel9.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-    m_jaddtax.setBorder(null);
-    m_jaddtax.setToolTipText(bundle.getString("tooltip.switchtax")); // NOI18N
-    m_jaddtax.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
-    m_jaddtax.setPreferredSize(new java.awt.Dimension(60, 30));
-    m_jaddtax.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        m_jaddtaxActionPerformed(evt);
-      }
-    });
+        m_jaddtax.setBorder(null);
+        m_jaddtax.setToolTipText(bundle.getString("tooltip.switchtax")); // NOI18N
+        m_jaddtax.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
+        m_jaddtax.setPreferredSize(new java.awt.Dimension(60, 30));
+        m_jaddtax.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                m_jaddtaxActionPerformed(evt);
+            }
+        });
 
-    m_jPrice.setFont(new java.awt.Font("Arial", 1, 16)); // NOI18N
-    m_jPrice.setForeground(new java.awt.Color(76, 197, 237));
-    m_jPrice.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
-    m_jPrice.setBorder(javax.swing.BorderFactory.createCompoundBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(76, 197, 237)), javax.swing.BorderFactory.createEmptyBorder(1, 4, 1, 4)));
-    m_jPrice.setOpaque(true);
-    m_jPrice.setPreferredSize(new java.awt.Dimension(100, 25));
-    m_jPrice.setRequestFocusEnabled(false);
+        m_jPrice.setFont(new java.awt.Font("Arial", 1, 16)); // NOI18N
+        m_jPrice.setForeground(new java.awt.Color(76, 197, 237));
+        m_jPrice.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
+        m_jPrice.setBorder(javax.swing.BorderFactory.createCompoundBorder(javax.swing.BorderFactory.createLineBorder(new java.awt.Color(76, 197, 237)), javax.swing.BorderFactory.createEmptyBorder(1, 4, 1, 4)));
+        m_jPrice.setOpaque(true);
+        m_jPrice.setPreferredSize(new java.awt.Dimension(100, 25));
+        m_jPrice.setRequestFocusEnabled(false);
 
-    m_jPor.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
-    m_jPor.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
-    m_jPor.setRequestFocusEnabled(false);
+        m_jPor.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
+        m_jPor.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+        m_jPor.setRequestFocusEnabled(false);
 
-    m_jEnter.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/barcode.png"))); // NOI18N
-    m_jEnter.setToolTipText(bundle.getString("tooltip.salebarcode")); // NOI18N
-    m_jEnter.setFocusPainted(false);
-    m_jEnter.setFocusable(false);
-    m_jEnter.setPreferredSize(new java.awt.Dimension(80, 45));
-    m_jEnter.setRequestFocusEnabled(false);
-    m_jEnter.addActionListener(new java.awt.event.ActionListener() {
-      public void actionPerformed(java.awt.event.ActionEvent evt) {
-        m_jEnterActionPerformed(evt);
-      }
-    });
+        m_jEnter.setIcon(new javax.swing.ImageIcon(getClass().getResource("/com/unicenta/images/barcode.png"))); // NOI18N
+        m_jEnter.setToolTipText(bundle.getString("tooltip.salebarcode")); // NOI18N
+        m_jEnter.setFocusPainted(false);
+        m_jEnter.setFocusable(false);
+        m_jEnter.setPreferredSize(new java.awt.Dimension(80, 45));
+        m_jEnter.setRequestFocusEnabled(false);
+        m_jEnter.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                m_jEnterActionPerformed(evt);
+            }
+        });
 
-    m_jTax.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
-    m_jTax.setToolTipText(bundle.getString("tooltip.salestaxswitch")); // NOI18N
-    m_jTax.setFocusable(false);
-    m_jTax.setPreferredSize(new java.awt.Dimension(28, 25));
-    m_jTax.setRequestFocusEnabled(false);
+        m_jTax.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
+        m_jTax.setToolTipText(bundle.getString("tooltip.salestaxswitch")); // NOI18N
+        m_jTax.setFocusable(false);
+        m_jTax.setPreferredSize(new java.awt.Dimension(28, 25));
+        m_jTax.setRequestFocusEnabled(false);
 
-    m_jKeyFactory.setEditable(false);
-    m_jKeyFactory.setFont(new java.awt.Font("Arial", 0, 11)); // NOI18N
-    m_jKeyFactory.setForeground(javax.swing.UIManager.getDefaults().getColor("Panel.background"));
-    m_jKeyFactory.setAutoscrolls(false);
-    m_jKeyFactory.setBorder(null);
-    m_jKeyFactory.setCaretColor(javax.swing.UIManager.getDefaults().getColor("Panel.background"));
-    m_jKeyFactory.setMinimumSize(new java.awt.Dimension(0, 0));
-    m_jKeyFactory.setPreferredSize(new java.awt.Dimension(1, 1));
-    m_jKeyFactory.setRequestFocusEnabled(false);
-    m_jKeyFactory.setVerifyInputWhenFocusTarget(false);
-    m_jKeyFactory.addKeyListener(new java.awt.event.KeyAdapter() {
-      public void keyTyped(java.awt.event.KeyEvent evt) {
-        m_jKeyFactoryKeyTyped(evt);
-      }
-    });
+        m_jKeyFactory.setEditable(false);
+        m_jKeyFactory.setFont(new java.awt.Font("Arial", 0, 11)); // NOI18N
+        m_jKeyFactory.setForeground(javax.swing.UIManager.getDefaults().getColor("Panel.background"));
+        m_jKeyFactory.setAutoscrolls(false);
+        m_jKeyFactory.setBorder(null);
+        m_jKeyFactory.setCaretColor(javax.swing.UIManager.getDefaults().getColor("Panel.background"));
+        m_jKeyFactory.setMinimumSize(new java.awt.Dimension(0, 0));
+        m_jKeyFactory.setPreferredSize(new java.awt.Dimension(1, 1));
+        m_jKeyFactory.setRequestFocusEnabled(false);
+        m_jKeyFactory.setVerifyInputWhenFocusTarget(false);
+        m_jKeyFactory.addKeyListener(new java.awt.event.KeyAdapter() {
+            public void keyTyped(java.awt.event.KeyEvent evt) {
+                m_jKeyFactoryKeyTyped(evt);
+            }
+        });
 
-    javax.swing.GroupLayout jPanel9Layout = new javax.swing.GroupLayout(jPanel9);
-    jPanel9.setLayout(jPanel9Layout);
-    jPanel9Layout.setHorizontalGroup(
+        javax.swing.GroupLayout jPanel9Layout = new javax.swing.GroupLayout(jPanel9);
+        jPanel9.setLayout(jPanel9Layout);
+        jPanel9Layout.setHorizontalGroup(
             jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel9Layout.createSequentialGroup()
+                .addGroup(jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                    .addComponent(m_jPor)
+                    .addComponent(m_jKeyFactory, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 7, Short.MAX_VALUE)
+                .addGroup(jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel9Layout.createSequentialGroup()
-                            .addGroup(jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                                    .addComponent(m_jPor)
-                                    .addComponent(m_jKeyFactory, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
-                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 7, Short.MAX_VALUE)
-                            .addGroup(jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addGroup(jPanel9Layout.createSequentialGroup()
-                                            .addComponent(m_jaddtax, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                            .addGap(7, 7, 7)
-                                            .addComponent(m_jTax, javax.swing.GroupLayout.PREFERRED_SIZE, 128, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED))
-                                    .addGroup(jPanel9Layout.createSequentialGroup()
-                                            .addComponent(m_jPrice, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                            .addGap(5, 5, 5)))
-                            .addComponent(m_jEnter, javax.swing.GroupLayout.PREFERRED_SIZE, 71, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addContainerGap())
-    );
-    jPanel9Layout.setVerticalGroup(
+                        .addComponent(m_jaddtax, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                        .addGap(7, 7, 7)
+                        .addComponent(m_jTax, javax.swing.GroupLayout.PREFERRED_SIZE, 128, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED))
+                    .addGroup(jPanel9Layout.createSequentialGroup()
+                        .addComponent(m_jPrice, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                        .addGap(5, 5, 5)))
+                .addComponent(m_jEnter, javax.swing.GroupLayout.PREFERRED_SIZE, 71, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap())
+        );
+        jPanel9Layout.setVerticalGroup(
             jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(jPanel9Layout.createSequentialGroup()
-                            .addComponent(m_jEnter, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addGap(0, 0, Short.MAX_VALUE))
-                    .addGroup(jPanel9Layout.createSequentialGroup()
-                            .addComponent(m_jPrice, javax.swing.GroupLayout.PREFERRED_SIZE, 44, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 7, Short.MAX_VALUE)
-                            .addGroup(jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(m_jTax, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 30, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                    .addComponent(m_jaddtax, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel9Layout.createSequentialGroup()
-                            .addComponent(m_jPor)
-                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                            .addComponent(m_jKeyFactory, javax.swing.GroupLayout.PREFERRED_SIZE, 1, javax.swing.GroupLayout.PREFERRED_SIZE))
-    );
+            .addGroup(jPanel9Layout.createSequentialGroup()
+                .addComponent(m_jEnter, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(0, 0, Short.MAX_VALUE))
+            .addGroup(jPanel9Layout.createSequentialGroup()
+                .addComponent(m_jPrice, javax.swing.GroupLayout.PREFERRED_SIZE, 44, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 7, Short.MAX_VALUE)
+                .addGroup(jPanel9Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(m_jTax, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 30, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(m_jaddtax, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)))
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel9Layout.createSequentialGroup()
+                .addComponent(m_jPor)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addComponent(m_jKeyFactory, javax.swing.GroupLayout.PREFERRED_SIZE, 1, javax.swing.GroupLayout.PREFERRED_SIZE))
+        );
 
-    m_jPanEntries.add(jPanel9);
+        m_jPanEntries.add(jPanel9);
 
-    m_jContEntries.add(m_jPanEntries, java.awt.BorderLayout.NORTH);
+        m_jContEntries.add(m_jPanEntries, java.awt.BorderLayout.NORTH);
 
-    m_jPanEntriesE.setLayout(new java.awt.BorderLayout());
-    m_jContEntries.add(m_jPanEntriesE, java.awt.BorderLayout.LINE_END);
+        m_jPanEntriesE.setLayout(new java.awt.BorderLayout());
+        m_jContEntries.add(m_jPanEntriesE, java.awt.BorderLayout.LINE_END);
 
-    m_jPanContainer.add(m_jContEntries, java.awt.BorderLayout.LINE_END);
+        m_jPanContainer.add(m_jContEntries, java.awt.BorderLayout.LINE_END);
 
-    catcontainer.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
-    catcontainer.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
-    catcontainer.setLayout(new java.awt.BorderLayout());
-    m_jPanContainer.add(catcontainer, java.awt.BorderLayout.SOUTH);
+        catcontainer.setBorder(javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        catcontainer.setFont(new java.awt.Font("Arial", 0, 14)); // NOI18N
+        catcontainer.setLayout(new java.awt.BorderLayout(0, 50));
+        m_jPanContainer.add(catcontainer, java.awt.BorderLayout.SOUTH);
 
-    add(m_jPanContainer, "ticket");
-  }// </editor-fold>//GEN-END:initComponents
+        add(m_jPanContainer, "ticket");
+    }// </editor-fold>//GEN-END:initComponents
 
   private void m_jbtnScaleActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_m_jbtnScaleActionPerformed
 
@@ -3677,6 +3784,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
                     jRadioButton1.setSelected(true);
                     jRadioButton3.setForeground(Color.black);
                     jRadioButton4.setForeground(Color.black);
+                    jRadioButton2.setForeground(Color.black);
                     jRadioButton1.setForeground(Color.red);
                     break;
                 case "UBER":
@@ -3685,6 +3793,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
                     jRadioButton4.setForeground(Color.black);
                     jRadioButton1.setForeground(Color.black);
                     jRadioButton3.setForeground(Color.red);
+                    jRadioButton2.setForeground(Color.black);
                     /*jRadioButton3.setActionCommand(lclOrderType);
                     jRadioButton3.setText(lclOrderType);*/
                     break;
@@ -3692,8 +3801,19 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
                     jRadioButton4.setEnabled(true);
                     jRadioButton4.setSelected(true);
                     jRadioButton3.setForeground(Color.black);
+                    jRadioButton2.setForeground(Color.black);
                     jRadioButton1.setForeground(Color.black);
                     jRadioButton4.setForeground(Color.red);
+                    /*jRadioButton4.setActionCommand(lclOrderType);
+                    jRadioButton4.setText(lclOrderType);*/
+                    break;
+                case "DINE-IN":
+                    jRadioButton2.setEnabled(true);
+                    jRadioButton2.setSelected(true);
+                    jRadioButton3.setForeground(Color.black);
+                    jRadioButton1.setForeground(Color.black);
+                    jRadioButton2.setForeground(Color.red);
+                    jRadioButton4.setForeground(Color.black);
                     /*jRadioButton4.setActionCommand(lclOrderType);
                     jRadioButton4.setText(lclOrderType);*/
                     break;
@@ -3703,7 +3823,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
            
            repaint();
            
-            
+            updateServiceCharge();
           }
         
         
@@ -3723,6 +3843,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
        jComboOrderType.setSelectedItem(jRadioButton1.getActionCommand());
        jRadioButton3.setForeground(Color.black);
          jRadioButton1.setForeground(Color.red);
+         jRadioButton2.setForeground(Color.black);
          jRadioButton4.setForeground(Color.black);
         
     }//GEN-LAST:event_jRadioButton1ActionPerformed
@@ -3732,6 +3853,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
          jComboOrderType.setSelectedItem(jRadioButton3.getActionCommand());
          jRadioButton3.setForeground(Color.red);
          jRadioButton1.setForeground(Color.black);
+         jRadioButton2.setForeground(Color.black);
          jRadioButton4.setForeground(Color.black);
     }//GEN-LAST:event_jRadioButton3ActionPerformed
 
@@ -3739,9 +3861,23 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
         // TODO add your handling code here:
          jComboOrderType.setSelectedItem(jRadioButton4.getActionCommand());
          jRadioButton3.setForeground(Color.black);
+         jRadioButton2.setForeground(Color.black);
          jRadioButton1.setForeground(Color.black);
          jRadioButton4.setForeground(Color.red);
     }//GEN-LAST:event_jRadioButton4ActionPerformed
+
+    private void jRadioButton2ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jRadioButton2ActionPerformed
+        // TODO add your handling code here:
+        jComboOrderType.setSelectedItem(jRadioButton2.getActionCommand());
+         jRadioButton3.setForeground(Color.black);
+         jRadioButton1.setForeground(Color.black);
+         jRadioButton4.setForeground(Color.black);
+         jRadioButton2.setForeground(Color.red);
+    }//GEN-LAST:event_jRadioButton2ActionPerformed
+
+    private void jComboTipoECFActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jComboTipoECFActionPerformed
+        // TODO add your handling code here:
+    }//GEN-LAST:event_jComboTipoECFActionPerformed
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
     private javax.swing.JButton btnReprint1;
@@ -3756,12 +3892,15 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
     private javax.swing.JComboBox<String> jComboOrderType;
     private javax.swing.JComboBox<String> jComboPickUpTime;
     private javax.swing.JComboBox<String> jComboSelectDay;
+    private javax.swing.JComboBox<String> jComboTipoECF;
     private javax.swing.JButton jEditAttributes;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel2;
     private javax.swing.JLabel jLabel3;
     private javax.swing.JLabel jLabel4;
     private javax.swing.JLabel jLabel5;
+    private javax.swing.JLabel jLabel6;
+    private javax.swing.JLabel jLabel7;
     private javax.swing.JTextField jOrderNo;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JPanel jPanel2;
@@ -3773,6 +3912,7 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
     private javax.swing.JRadioButton jRadioButton2;
     private javax.swing.JRadioButton jRadioButton3;
     private javax.swing.JRadioButton jRadioButton4;
+    private javax.swing.JScrollBar jScrollBar1;
     private javax.swing.JToggleButton jTBtnShow;
     private javax.swing.JButton j_btnRemotePrt;
     private javax.swing.JButton jbtnMooring;
@@ -3898,5 +4038,127 @@ public abstract class JPanelTicket extends JPanel implements JPanelView, BeanFac
       }
     }
   }
+
+/*private void updateServiceCharge() {
+    double serviceRate = 0.10; // 10% Service Charge
+    String orderType ;
+    orderType= jComboOrderType.getSelectedItem().toString(); // Determine the order type
+
+    // Apply service charge only for dine-in orders
+    if ("DINE-IN".equals(orderType)) {
+        double serviceChargeTotal = 0.0;
+
+        // Recalculate the total service charge based on current ticket lines
+        for (TicketLineInfo line : m_oTicket.getLines()) {
+            if (!"xxx998_998xxx_x8x8x8".equals(line.getProductID())) { // Exclude service charge line itself
+                serviceChargeTotal += line.getSubValue() * serviceRate;
+            }
+        }
+
+        // Find existing service charge line
+        TicketLineInfo serviceChargeLine = null;
+        for (TicketLineInfo line : m_oTicket.getLines()) {
+            if ("xxx998_998xxx_x8x8x8".equals(line.getProductID())) {
+                serviceChargeLine = line;
+                break;
+            }
+        }
+
+        if (serviceChargeTotal > 0) {
+            if (serviceChargeLine != null) {
+                // Update the existing service charge line
+                serviceChargeLine.setPrice(serviceChargeTotal);
+            } else {
+                // Add a new service charge line if none exists
+                TaxInfo tax = taxeslogic.getTaxInfo("SERVICE_TAX"); // Replace with appropriate tax info
+                TicketLineInfo newServiceChargeLine = new TicketLineInfo(
+                    "xxx998_998xxx_x8x8x8",
+                   "Service Charge" ,"002",
+                    "0",
+                    1.0,
+                    serviceChargeTotal,
+                    tax
+                
+                );
+                m_oTicket.addLine(newServiceChargeLine);
+            }
+        } else if (serviceChargeLine != null) {
+            // Remove the service charge line if total is zero
+            m_oTicket.removeLine(m_oTicket.getLines().indexOf(serviceChargeLine));
+        }
+    } else {
+        // Remove the service charge line for non-dine-in orders
+        m_oTicket.getLines().removeIf(line -> "xxx998_998xxx_x8x8x8".equals(line.getProductID()));
+    }
+
+    // Refresh the ticket display
+    refreshTicket();
+}*/
+ private void updateServiceCharge() {
+    if (m_oTicket == null || jComboOrderType == null) {
+        return; // Exit if ticket or order type combo box is not initialized
+    }
+
+    String orderType = (jComboOrderType.getSelectedItem() != null) 
+        ? jComboOrderType.getSelectedItem().toString() 
+        : "";
+
+    if (m_oTicket.getLines() == null) {
+        return; // Exit if ticket lines are not initialized
+    }
+
+    final String SERVICE_CHARGE_PRODUCT_ID = "xxx998_998xxx_x8x8x8"; // Unique ID for Service Charge
+    double serviceRate = 0.10; // 10% Service Charge
+
+    if ("DINE-IN".equals(orderType)) {
+        double serviceChargeTotal = 0.0;
+
+        // Recalculate the total service charge based on current ticket lines
+        for (TicketLineInfo line : m_oTicket.getLines()) {
+            if (!SERVICE_CHARGE_PRODUCT_ID.equals(line.getProductID())) {
+                serviceChargeTotal += line.getSubValue() * serviceRate;
+            }
+        }
+
+        // Find existing service charge line
+        TicketLineInfo serviceChargeLine = null;
+        for (TicketLineInfo line : m_oTicket.getLines()) {
+            if (SERVICE_CHARGE_PRODUCT_ID.equals(line.getProductID())) {
+                serviceChargeLine = line;
+                break;
+            }
+        }
+
+        if (serviceChargeTotal > 0) {
+            if (serviceChargeLine != null) {
+                // Update the existing service charge line
+                serviceChargeLine.setPrice(serviceChargeTotal);
+            } else {
+                // Create a service charge line with a 0% tax fallback
+                TicketLineInfo newServiceChargeLine = new TicketLineInfo(
+                    SERVICE_CHARGE_PRODUCT_ID,
+                    "Service Charge",
+                    "002",  // Product category or group (optional)
+                    "0",    // Attributes or additional info (optional)
+                    1.0,    // Quantity
+                    serviceChargeTotal,
+                    null    // Pass null for tax to avoid relying on tax logic
+                );
+                m_oTicket.addLine(newServiceChargeLine);
+            }
+        } else if (serviceChargeLine != null) {
+            m_oTicket.removeLine(m_oTicket.getLines().indexOf(serviceChargeLine));
+        }
+    } else {
+        // Remove the service charge line for non-dine-in orders
+        m_oTicket.getLines().removeIf(line -> SERVICE_CHARGE_PRODUCT_ID.equals(line.getProductID()));
+    }
+
+    refreshTicket();
+}
+
+
+
+
 
 }

@@ -19,6 +19,7 @@
 
 package com.unicenta.pos.printer.escpos;
 
+import com.unicenta.pos.printer.DevicePrinter;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.LinkedList;
@@ -67,7 +68,7 @@ public final class PrinterWritterRaw extends PrinterWritter {
         byte[] inicode = concatByteArrays(ESCPOS.SELECT_PRINTER, new UnicodeTranslatorInt().getCodeTable());
         m_printData = concatByteArrays(inicode, m_printData);
     }
-
+    
     @Override
     public void write(byte[] data) {
         m_printData = concatByteArrays(m_printData, data);
@@ -77,6 +78,7 @@ public final class PrinterWritterRaw extends PrinterWritter {
     public void write(String sValue) {
         m_buff.putData(sValue.getBytes());
     }
+
 
     @Override
     protected void internalWrite(byte[] data) {

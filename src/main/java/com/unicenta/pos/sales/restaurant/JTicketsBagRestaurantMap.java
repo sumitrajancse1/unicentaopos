@@ -705,8 +705,83 @@ Integer count = restDB.getGuestsInTable(place.getId());
         CardLayout cl = (CardLayout)(getLayout());
         cl.show(this, view);  
     }
+private class MyActionListener implements ActionListener {
 
-    private class MyActionListener implements ActionListener {
+    private final Place m_place;
+
+    public MyActionListener(Place place) {
+        m_place = place;
+    }
+
+    @Override
+    public void actionPerformed(ActionEvent evt) {
+        m_App.getAppUserView().getUser();
+
+        if (!actionEnabled) {
+            m_place.setDiffX(0);
+        } else {
+            if (m_PlaceClipboard == null) {
+                TicketInfo ticket = getTicketInfo(m_place);
+                if (ticket == null) {  // Empty table
+                    ticket = new TicketInfo();
+                    ticket.setUser(m_App.getAppUserView().getUser().getUserInfo());
+
+                    // Determine the order type based on the table name
+                    String tableName = m_place.getName();
+                    String orderType;
+                    switch (tableName.toLowerCase()) {
+                        case "pedidosya orders":
+                            orderType = "PEDIDOSYA";
+                            break;
+                        case "uber orders":
+                            orderType = "UBER";
+                            break;
+                        case "take out":
+                            orderType = "TAKE OUT";
+                            break;
+                        default:
+                            orderType = "DINE-IN";
+                            break;
+                    }
+
+                    // Set the order type in the ticket
+                    ticket.setOrderType(orderType);
+                    //ticket.setProperty("orderType", orderType); // Assuming `setProperty` is used for custom fields
+
+                    try {
+                        dlReceipts.insertSharedTicket(m_place.getId(), ticket, ticket.getPickupId());
+                    } catch (BasicException e) {
+                        new MessageInf(e).show(JTicketsBagRestaurantMap.this);
+                    }
+                    m_place.setPeople(true);
+                    m_place.setGuests(restDB.updateGuestsInTable(m_place.getId()));
+                    setActivePlace(m_place, ticket);
+                } else {
+                    // Handle non-empty table logic (no change required here)
+                    String m_lockState = null;
+                    try {
+                        m_lockState = dlReceipts.getLockState(m_place.getId(), m_lockState);
+
+                        if ("locked".equals(m_lockState)) {
+                            JOptionPane.showMessageDialog(null, 
+                                AppLocal.getIntString("message.sharedticketlock"));
+                            // Other existing logic remains unchanged
+                        } else {
+                            m_place.setPeople(true);
+                            m_PlaceClipboard = null;
+                            m_lockState = "locked";
+                            setActivePlace(m_place, ticket);
+                        }
+                    } catch (BasicException ex) {
+                        log.error(ex.getMessage());
+                    }
+                }
+            }
+        }
+    }
+}
+
+   /* private class MyActionListener implements ActionListener {
 
         private final Place m_place;
         public MyActionListener(Place place) {
@@ -881,7 +956,7 @@ Integer count = restDB.getGuestsInTable(place.getId());
                     } // end of Merge
             } // end of !actionEnabled 
         } // end of actionPerformed
-    } // end of Action Listener
+    } // end of Action Listener */
 
     /**
      *

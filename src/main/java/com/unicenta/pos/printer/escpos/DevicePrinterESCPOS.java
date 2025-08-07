@@ -23,6 +23,8 @@ import com.unicenta.pos.forms.AppLocal;
 import com.unicenta.pos.printer.DevicePrinter;
 import com.unicenta.pos.printer.TicketPrinterException;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.OutputStream;
 import javax.swing.JComponent;
 
 /**
@@ -37,6 +39,8 @@ public class DevicePrinterESCPOS implements DevicePrinter  {
     
 //    private boolean m_bInline;
     private String m_sName;
+    private OutputStream m_rawOutputStream;
+
     
     
     // Creates new TicketPrinter
@@ -63,6 +67,16 @@ public class DevicePrinterESCPOS implements DevicePrinter  {
         m_CommOutputPrinter.write(m_trans.getCodeTable());
 
         m_CommOutputPrinter.flush();  
+        // 🛡️ TRY OPEN REAL RAW PRINTER STREAM
+    try {
+        if (CommOutputPrinter instanceof PrinterWritterRXTX) {
+            m_rawOutputStream = ((PrinterWritterRXTX) CommOutputPrinter).getRawOutputStream();
+        } else if (CommOutputPrinter instanceof PrinterWritterFile) {
+            m_rawOutputStream = ((PrinterWritterFile) CommOutputPrinter).getRawOutputStream();
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
     }
    
     /**
@@ -215,6 +229,15 @@ public class DevicePrinterESCPOS implements DevicePrinter  {
     /**
      *
      */
+    public PrinterWritter getPrinterWritter() {
+    return m_CommOutputPrinter;
+}
+    
+    public OutputStream getOutputStream() {
+    return m_rawOutputStream;
+}
+    
+  
     public void openDrawer() {
 
         m_CommOutputPrinter.write(ESCPOS.SELECT_PRINTER); 
@@ -224,4 +247,3 @@ m_CommOutputPrinter.write(m_codes.getOpenDrawer());
         m_CommOutputPrinter.flush();
     }
 }
-

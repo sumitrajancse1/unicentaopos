@@ -487,5 +487,9 @@ public class TicketLineInfo implements SerializableWrite, SerializableRead, Seri
     public void setUpdated(Boolean value) {
         updated = value;
     }
-   
+     
+   public boolean isServiceChargeLine() {
+    return "xxx998_998xxx_x8x8x8".equals(this.getProductID());
+}
+
 }

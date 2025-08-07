@@ -28,6 +28,12 @@ import com.unicenta.format.Formats;
 import com.unicenta.pos.catalog.CategoryStock;
 import com.unicenta.pos.customers.CustomerInfoExt;
 import com.unicenta.pos.customers.CustomerTransaction;
+import com.unicenta.pos.einvoice.ECFConfig;
+import com.unicenta.pos.einvoice.ECFData;
+import com.unicenta.pos.einvoice.ECFMapper;
+import com.unicenta.pos.einvoice.ECFSigner;
+import com.unicenta.pos.einvoice.ECFXMLBuilder;
+import com.unicenta.pos.einvoice.ENCFGenerator;
 import com.unicenta.pos.inventory.*;
 import com.unicenta.pos.mant.FloorsInfo;
 import com.unicenta.pos.payment.PaymentInfo;
@@ -45,7 +51,13 @@ import java.util.List;
 import java.util.UUID;
 import java.util.logging.Logger;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import org.apache.commons.lang.StringUtils;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
 
 /**
  *
@@ -1095,7 +1107,14 @@ public class DataLogicSales extends BeanFactoryDataSingle {
                     + "T.SELECTDAY, "
                     + "T.PICKUPTIME, "
                     + "T.NCFTYPE,"
-                    + "T.ORDERNO "
+                    + "T.ORDERNO,"
+                + " T.ENCF,"
+                + "T.ENCF_SIGNATURE,"
+                + "T.ENCF_SIGNED_AT,"
+                + " T.ENCF_SENT_AT,"
+                + "T.ENCF_STATUS,"
+                + "T.ENCF_RESPONSE_PATH,"
+                + "T.ENCF_QR_PATH"
                     + "FROM receipts R "
                     + "JOIN tickets T ON R.ID = T.ID LEFT OUTER JOIN payments PM "
                     + "ON R.ID = PM.RECEIPT LEFT OUTER JOIN customers C "
@@ -1604,7 +1623,14 @@ public class DataLogicSales extends BeanFactoryDataSingle {
                 + "T.SELECTDAY, "
                 + "T.PICKUPTIME, "
                 + "T.NCFTYPE, "
-                + "T.ORDERNO "
+                + "T.ORDERNO,"
+                + " T.ENCF,"
+                + "T.ENCF_SIGNATURE,"
+                + "T.ENCF_SIGNED_AT,"
+                + " T.ENCF_SENT_AT,"
+                + "T.ENCF_STATUS,"
+                + "T.ENCF_RESPONSE_PATH,"
+                + "T.ENCF_QR_PATH"
                 + "FROM receipts R "
                 + "JOIN tickets T ON R.ID = T.ID "
                 + "LEFT OUTER JOIN people P ON T.PERSON = P.ID "
@@ -1743,11 +1769,82 @@ public class DataLogicSales extends BeanFactoryDataSingle {
                         });
                      //} //cashInd2
                  }
-                
+                 // ✅ 🔐 Inject ENCF based on tipo (e.g. "31", "32")
+ try {
+    // ⚙️ 1. Determine ECF Type
+    // 🥷 Read the tipo from ticket property
+    String encfTipo = ticket.getProperty("encf_tipo", "32"); // fallback default 32 if not set
+
+
+    // 🏭 2. Generate e-NCF based on type
+    ENCFGenerator generator = new ENCFGenerator(s.getConnection());
+    String encf = generator.getNextENCF(encfTipo); 
+    ticket.setENCF(encf); // 🔁 Assign ENCF to ticket object
+
+    // 🧠 3. Map ticket to ECF model
+    ECFData ecfData = ECFMapper.fromTicket(ticket, m_App);
+
+    // 🏗️ 4. Build unsigned XML
+    String xmlContent = ECFXMLBuilder.buildECFXML(ecfData);
+    String ticketId = String.valueOf(ticket.getTicketId());
+
+    Path outputDir = Paths.get(System.getProperty("user.home"), "unicenta", "ecf_output");
+    Files.createDirectories(outputDir);
+
+    Path xmlPath = outputDir.resolve(ticketId + "_unsigned.xml");
+    Files.write(xmlPath, xmlContent.getBytes(StandardCharsets.UTF_8));
+    System.out.println("✅ [ENCF] XML saved to: " + xmlPath.toAbsolutePath());
+
+    // ✍️ Optional: Signature (implement if needed)
+    // ECFSigner signer = new ECFSigner();
+    // String signedPath = signer.sign(xmlPath.toString());
+
+    // 🧾 5. Log ENCF meta to ticket for tracking
+    ticket.setProperty("encf_signed_path", xmlPath.toString());
+    ticket.setProperty("encf_signed_at", new Date().toString());
+
+} catch (Exception ex) {
+    System.err.println("[ENCF ERROR] Failed to generate or sign ENCF: " + ex.getMessage());
+    ex.printStackTrace();
+}
+// Inside DataLogicSales (or wherever you close/save the sale ticket)
+try {
+    String baseQrUrl = ECFConfig.get("dgii.qr.base", "https://ecf.dgii.gov.do/consulta?");
+    String encf = ticket.getENCF();
+    String rnc = ECFConfig.get("issuer.rnc", "131935486"); // fallback from properties
+    double total = ticket.getTotal();
+    String fecha = new SimpleDateFormat("yyyy-MM-dd").format(ticket.getDate());
+
+    if (encf != null && !encf.isEmpty()) {
+        // 🛡 Build the raw QR URL
+        String rawQrUrl = baseQrUrl + "eNCF=" + encf 
+                        + "%26rnc=" + rnc 
+                        + "%26monto=" + String.format("%.2f", total) 
+                        + "%26fecha=" + fecha;
+
+        // 🛡 Escape & safely for XML
+        String safeQrUrl = rawQrUrl.replace("&", "&amp;");
+
+        // ✅ Save into Ticket fields
+        ticket.setENCFQrPath(rawQrUrl);  // Save original QR for future reference if needed
+        ticket.setProperty("encf_qr_path", safeQrUrl); // Save safe version for receipt printout
+
+        System.out.println("✅ [QR] QR URL generated: " + rawQrUrl);
+    } else {
+        System.err.println("⚠️ [QR] ENCF missing, cannot generate QR URL.");
+    }
+} catch (Exception ex) {
+    System.err.println("❌ [QR ERROR] Failed to generate QR URL: " + ex.getMessage());
+    ex.printStackTrace();
+}
+
+
+
                 // new ticket
-                new PreparedSentence(s
-                        , "INSERT INTO tickets (ID, TICKETTYPE, TICKETID, PERSON, CUSTOMER, STATUS, ORDERTYPE, SELECTDAY, PICKUPTIME, NCFTYPE, ORDERNO) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?,?,?,?,?)"
+                new PreparedSentence(s,
+    "INSERT INTO tickets (ID, TICKETTYPE, TICKETID, PERSON, CUSTOMER, STATUS, ORDERTYPE, SELECTDAY, PICKUPTIME, NCFTYPE, ORDERNO, " +
+    "ENCF, ENCF_SIGNATURE, ENCF_SIGNED_AT, ENCF_SENT_AT, ENCF_STATUS, ENCF_RESPONSE_PATH, ENCF_QR_PATH) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                         , SerializerWriteParams.INSTANCE )
                         .exec(new DataParams() {
 
@@ -1764,6 +1861,14 @@ public class DataLogicSales extends BeanFactoryDataSingle {
                                 setString(9, ticket.getPickupTime());
                                     setString(10, ticket.getncfType());
                                 setString(11, ticket.getOrderNo());
+                                // 🎯 e-CF fields start here
+setString(12, ticket.getENCF());
+setString(13, ticket.getENCFSignature());
+setTimestamp(14, ticket.getENCFSignedAt() != null ? new Timestamp(ticket.getENCFSignedAt().getTime()) : null);
+setTimestamp(15, ticket.getENCFSentAt() != null ? new Timestamp(ticket.getENCFSentAt().getTime()) : null);
+setString(16, ticket.getENCFStatus());
+setString(17, ticket.getENCFResponsePath());
+setString(18, ticket.getENCFQrPath());
                                     
                             }
                         });
@@ -1891,6 +1996,7 @@ public class DataLogicSales extends BeanFactoryDataSingle {
         };
 
         t.execute();
+        
     }
 
     /**
@@ -2940,4 +3046,4 @@ public class DataLogicSales extends BeanFactoryDataSingle {
     }
 
 
-}
+}   

@@ -60,6 +60,10 @@ public class TaxInfo implements Serializable, IKeyed {
         this.cascade = cascade;
         this.order = order;
     }
+
+    public TaxInfo(String no_tax, String no_Tax, double d, boolean b, Object object) {
+        throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+    }
     
     /**
      *

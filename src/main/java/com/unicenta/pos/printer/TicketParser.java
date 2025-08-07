@@ -1,24 +1,8 @@
-//    uniCenta oPOS  - Touch Friendly Point Of Sale
-//    Copyright (c) 2009-2018 uniCenta & previous Openbravo POS works
-//    https://unicenta.com
-//
-//    This file is part of uniCenta oPOS
-//
-//    uniCenta oPOS is free software: you can redistribute it and/or modify
-//    it under the terms of the GNU General Public License as published by
-//    the Free Software Foundation, either version 3 of the License, or
-//    (at your option) any later version.
-//
-//   uniCenta oPOS is distributed in the hope that it will be useful,
-//    but WITHOUT ANY WARRANTY; without even the implied warranty of
-//    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-//    GNU General Public License for more details.
-//
-//    You should have received a copy of the GNU General Public License
-//    along with uniCenta oPOS.  If not, see <http://www.gnu.org/licenses/>.
 
 package com.unicenta.pos.printer;
 
+import java.awt.Graphics2D;
+import java.awt.Color; // Also needed for setting background white
 import com.unicenta.basic.BasicException;
 import com.unicenta.data.loader.LocalRes;
 import com.unicenta.pos.forms.DataLogicSystem;
@@ -44,6 +28,15 @@ import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 
+// 🛡️ QR Code libraries
+import com.google.zxing.WriterException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+
+import java.io.File;
+import javax.imageio.ImageIO;
+import java.util.UUID;
 /**
  *
  * @author JG uniCenta
@@ -240,6 +233,9 @@ public class TicketParser extends DefaultHandler {
             case "line":
                 m_oOutputPrinter.beginLine(parseInt(attributes.getValue("size"), DevicePrinter.SIZE_0));
                 break;
+                 case "qr": // 🛡️ New tag for QR support
+                        text = new StringBuilder();
+                        break;
             case "text":
                 text = new StringBuilder();
                 m_iTextStyle = ("true".equals(attributes.getValue("bold")) 
@@ -250,7 +246,7 @@ public class TicketParser extends DefaultHandler {
                 if (null == sAlign) {
                     m_iTextAlign = DevicePrinter.ALIGN_LEFT;
                 } else switch (sAlign) {
-            case "right":
+             case "right":
                 m_iTextAlign = DevicePrinter.ALIGN_RIGHT;
                 break;
             case "center":
@@ -381,8 +377,30 @@ public class TicketParser extends DefaultHandler {
                 } else {
                     m_oOutputPrinter.printText(m_iTextStyle, text.toString());
                 }
-                text = null;
-            } else if ("line".equals(qName)) {
+                text = null;}
+            else if ("qr".equals(qName)) {
+    try {
+        String qrText = text.toString();
+        
+        // 🛡️ 1. Generate QR temp image
+        String tempQRPath = generateTempQRFile(qrText);
+
+        if (tempQRPath != null) {
+            // 🛡️ 2. Print QR image using the <image> tag logic
+            BufferedImage qrImage = ImageIO.read(new File(tempQRPath));
+            if (qrImage != null) {
+                m_oOutputPrinter.printImage(qrImage);
+            }
+
+            // 🛡️ 3. Delete temp file after printing
+            new File(tempQRPath).delete();
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    text = null;
+}
+ else if ("line".equals(qName)) {
                 m_oOutputPrinter.endLine();
             } else if ("ticket".equals(qName)) {
                 m_oOutputPrinter.endReceipt();
@@ -502,5 +520,43 @@ public class TicketParser extends DefaultHandler {
         return image;
 
 
-    }    
+    } 
+  
+public static String generateTempQRFile(String qrData) {
+    try {
+        BufferedImage qrImage = QRGenerator.generateQR(qrData, 150);
+        int printerWidth = 384; // Set to your printer width in pixels
+        int qrWidth = qrImage.getWidth();
+        int qrHeight = qrImage.getHeight();
+
+        BufferedImage alignedImage = new BufferedImage(printerWidth, qrHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = alignedImage.createGraphics();
+        g2d.setColor(Color.WHITE);
+        g2d.fillRect(0, 0, printerWidth, qrHeight);
+
+        // Optional debug border (keep for now)
+        /*g2d.setColor(Color.BLACK);
+        g2d.drawLine(0, 0, printerWidth - 1, 0); // Top
+        g2d.drawLine(0, qrHeight - 1, printerWidth - 1, qrHeight - 1); // Bottom
+        g2d.drawLine(0, 0, 0, qrHeight - 1); // Left
+        g2d.drawLine(printerWidth - 1, 0, printerWidth - 1, qrHeight - 1); // Right
+*/
+        // Shift QR 24px from the left edge
+        int xOffset = 1;
+        g2d.drawImage(qrImage, xOffset, 0, null);
+        g2d.dispose();
+
+        String tempDir = System.getProperty("java.io.tmpdir");
+        String tempFileName = "qr_" + UUID.randomUUID().toString() + ".png";
+        File tempFile = new File(tempDir, tempFileName);
+        ImageIO.write(alignedImage, "png", tempFile);
+        System.out.println("LEFT QR IMAGE WIDTH: " + alignedImage.getWidth() + " HEIGHT: " + alignedImage.getHeight() + " Saved to: " + tempFile.getAbsolutePath());
+        return tempFile.getAbsolutePath();
+    } catch (Exception e) {
+        e.printStackTrace();
+        return null;
+    }
+}
+
+  
 }
